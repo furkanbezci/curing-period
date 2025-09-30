@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -10,12 +10,45 @@ import {
 } from 'react-native';
 import { formatDate, calculateDueDate } from '../utils/dateUtils';
 import { COLORS, CURE_PERIODS } from '../constants';
+import DatePickerField from './DatePickerField';
+import PhotoAttachmentField from './PhotoAttachmentField';
 
-const AddSampleModal = ({ visible, onClose, onSave }) => {
+const MODES = {
+  create: 'create',
+  edit: 'edit',
+};
+
+const AddSampleModal = ({
+  visible,
+  onClose,
+  onSave,
+  onUpdate,
+  mode = MODES.create,
+  initialSample = null,
+}) => {
   const [sampleName, setSampleName] = useState('');
   const [cureDays, setCureDays] = useState(28);
+  const [startDate, setStartDate] = useState(new Date());
+  const [photoUri, setPhotoUri] = useState(null);
+  const isEdit = mode === MODES.edit;
 
-  const handleSave = () => {
+  useEffect(() => {
+    if (!visible) {
+      return;
+    }
+
+    if (isEdit && initialSample) {
+      setSampleName(initialSample.name ?? '');
+      setCureDays(initialSample.cureDays ?? 28);
+      setStartDate(initialSample.cureDate ? new Date(initialSample.cureDate) : new Date());
+      setPhotoUri(initialSample.photoUri ?? null);
+    } else {
+      resetForm();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, isEdit, initialSample]);
+
+  const handleSave = async () => {
     if (!sampleName.trim()) {
       Alert.alert('Hata', 'Numune adı giriniz.');
       return;
@@ -26,24 +59,43 @@ const AddSampleModal = ({ visible, onClose, onSave }) => {
       return;
     }
 
-    const now = new Date();
+    const selectedStartDate = startDate instanceof Date ? startDate : new Date(startDate);
+    const dueDate = calculateDueDate(selectedStartDate, cureDays);
+    const createdAt = isEdit && initialSample?.createdAt
+      ? new Date(initialSample.createdAt)
+      : new Date();
     const sample = {
-      id: Date.now().toString(),
+      id: initialSample?.id ?? Date.now().toString(),
       name: sampleName.trim(),
-      cureDate: now.toISOString(),
+      cureDate: selectedStartDate.toISOString(),
       cureDays,
-      dueDate: calculateDueDate(now, cureDays).toISOString(),
-      completed: false,
-      createdAt: now.toISOString(),
+      dueDate: dueDate.toISOString(),
+      completed: initialSample?.completed ?? false,
+      createdAt: createdAt.toISOString(),
+      photoUri: photoUri ?? null,
     };
 
-    onSave(sample);
-    resetForm();
+    try {
+      let result = true;
+      if (isEdit && onUpdate) {
+        result = await onUpdate(sample);
+      } else {
+        result = await onSave(sample);
+      }
+      if (result === false) {
+        return;
+      }
+      handleClose();
+    } catch (error) {
+      console.error('Numune kaydedilemedi:', error);
+    }
   };
 
   const resetForm = () => {
     setSampleName('');
     setCureDays(28);
+    setStartDate(new Date());
+    setPhotoUri(null);
   };
 
   const handleClose = () => {
@@ -61,7 +113,7 @@ const AddSampleModal = ({ visible, onClose, onSave }) => {
       <View style={styles.overlay}>
         <View style={styles.modal}>
           <View style={styles.header}>
-            <Text style={styles.title}>Yeni Numune Ekle</Text>
+            <Text style={styles.title}>{isEdit ? 'Numuneyi Düzenle' : 'Yeni Numune Ekle'}</Text>
             <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
               <Text style={styles.closeButtonText}>✕</Text>
             </TouchableOpacity>
@@ -81,16 +133,19 @@ const AddSampleModal = ({ visible, onClose, onSave }) => {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Kür Başlangıç Tarihi</Text>
-              <View style={styles.dateInfo}>
-                <Text style={styles.dateInfoText}>
-                  📅 Şimdi: {formatDate(new Date())}
-                </Text>
-                <Text style={styles.dateInfoSubtext}>
-                  Numune şu anki tarihle başlayacak
-                </Text>
-              </View>
+              <DatePickerField
+                label="Kür Başlangıç Tarihi"
+                value={startDate}
+                onChange={setStartDate}
+                mode="datetime"
+                placeholder="Başlangıç tarihi seçin"
+              />
+              <Text style={styles.dateInfoSubtext}>
+                Seçtiğiniz tarih numunenin kür başlangıcı olarak kaydedilecek
+              </Text>
             </View>
+
+            <PhotoAttachmentField value={photoUri} onChange={setPhotoUri} />
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Kür Süresi</Text>
@@ -130,11 +185,15 @@ const AddSampleModal = ({ visible, onClose, onSave }) => {
               <Text style={styles.summaryTitle}>📋 Özet</Text>
               <Text style={styles.summaryText}>
                 <Text style={styles.summaryLabel}>Başlangıç: </Text>
-                {formatDate(new Date())}
+                {formatDate(startDate)}
               </Text>
               <Text style={styles.summaryText}>
                 <Text style={styles.summaryLabel}>Bitiş Tarihi: </Text>
-                {formatDate(calculateDueDate(new Date(), cureDays))}
+                {formatDate(calculateDueDate(startDate, cureDays))}
+              </Text>
+              <Text style={styles.summaryText}>
+                <Text style={styles.summaryLabel}>Fotoğraf: </Text>
+                {photoUri ? 'Eklendi' : 'Yok'}
               </Text>
             </View>
           </View>
@@ -150,7 +209,7 @@ const AddSampleModal = ({ visible, onClose, onSave }) => {
               style={[styles.button, styles.saveButton]}
               onPress={handleSave}
             >
-              <Text style={styles.saveButtonText}>Kaydet</Text>
+              <Text style={styles.saveButtonText}>{isEdit ? 'Güncelle' : 'Kaydet'}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -217,18 +276,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: COLORS.dark,
     backgroundColor: COLORS.white,
-  },
-  dateInfo: {
-    backgroundColor: COLORS.gray[50],
-    borderRadius: 8,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: COLORS.gray[200],
-  },
-  dateInfoText: {
-    fontSize: 16,
-    color: COLORS.dark,
-    fontWeight: '500',
   },
   dateInfoSubtext: {
     fontSize: 14,

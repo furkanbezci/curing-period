@@ -24,7 +24,11 @@ export const differenceInHours = (date1, date2) => {
 };
 
 export const differenceInDays = (date1, date2) => {
-  return Math.floor((date1 - date2) / (1000 * 60 * 60 * 24));
+  const diff = (date1 - date2) / (1000 * 60 * 60 * 24);
+  if (diff >= 0) {
+    return Math.ceil(diff);
+  }
+  return Math.floor(diff);
 };
 
 export const isBefore = (date1, date2) => {
@@ -39,14 +43,14 @@ export const getRemainingTime = (dueDate) => {
     return { text: 'Süre doldu', color: '#DC2626', status: 'overdue' };
   }
   
-  const diffMinutes = differenceInMinutes(due, now);
-  const diffHours = differenceInHours(due, now);
-  const diffDays = differenceInDays(due, now);
-  
+  const diffMinutes = Math.max(1, differenceInMinutes(due, now));
+  const diffHours = Math.max(1, differenceInHours(due, now));
+  const diffDays = Math.max(1, differenceInDays(due, now));
+
   if (diffMinutes < 60) {
     return { text: `${diffMinutes} dakika kaldı`, color: '#D97706', status: 'urgent' };
   }
-  
+
   if (diffHours < 24) {
     return { text: `${diffHours} saat kaldı`, color: '#D97706', status: 'urgent' };
   }
