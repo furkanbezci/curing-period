@@ -15,6 +15,7 @@ import SampleListHeader from '../components/SampleListHeader';
 import SampleEmptyState from '../components/SampleEmptyState';
 import { StorageService } from '../services/storageService';
 import { NotificationService } from '../services/notificationService';
+import { MediaService } from '../services/mediaService';
 import { COLORS } from '../constants';
 import { getRemainingTime } from '../utils/dateUtils';
 
@@ -61,7 +62,13 @@ const HomeScreen = () => {
 
   const handleAddSample = useCallback(async (sample) => {
     try {
-      const notificationId = await NotificationService.scheduleCureNotification(
+      const notificationIds = await NotificationService.scheduleCureNotification(
+        sample.id,
+        sample.name,
+        sample.dueDate
+      );
+
+      await NotificationService.scheduleTestHourReminder(
         sample.id,
         sample.name,
         sample.dueDate
@@ -69,7 +76,7 @@ const HomeScreen = () => {
 
       const sampleWithNotification = {
         ...sample,
-        notificationId,
+        notificationIds,
       };
 
       let updatedSamples = [];
@@ -117,8 +124,12 @@ const HomeScreen = () => {
           onPress: async () => {
             try {
               const sample = samples.find(s => s.id === sampleId);
-              if (sample?.notificationId) {
-                await NotificationService.cancelNotification(sample.notificationId);
+              if (sample?.notificationIds || sample?.notificationId) {
+                await NotificationService.cancelNotification(sample.notificationIds ?? sample.notificationId);
+              }
+
+              if (sample?.photoUri) {
+                await MediaService.deletePhoto(sample.photoUri);
               }
 
               let updatedSamples = [];
@@ -144,11 +155,11 @@ const HomeScreen = () => {
         return false;
       }
 
-      if (existing.notificationId) {
-        await NotificationService.cancelNotification(existing.notificationId);
+      if (existing.notificationIds || existing.notificationId) {
+        await NotificationService.cancelNotification(existing.notificationIds ?? existing.notificationId);
       }
 
-      const notificationId = await NotificationService.scheduleCureNotification(
+      const notificationIds = await NotificationService.scheduleCureNotification(
         updatedSample.id,
         updatedSample.name,
         updatedSample.dueDate
@@ -156,11 +167,14 @@ const HomeScreen = () => {
 
       let nextSamples = [];
       setSamples((prev) => {
-        nextSamples = prev.map(sample =>
-          sample.id === updatedSample.id
-            ? { ...sample, ...updatedSample, notificationId }
-            : sample
-        );
+        nextSamples = prev.map(sample => {
+          if (sample.id !== updatedSample.id) {
+            return sample;
+          }
+
+          const { notificationId: _legacyId, notificationIds: _legacyIds, ...rest } = sample;
+          return { ...rest, ...updatedSample, notificationIds };
+        });
         return nextSamples;
       });
 

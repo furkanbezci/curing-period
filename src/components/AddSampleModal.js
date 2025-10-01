@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,11 +7,13 @@ import {
   Modal,
   StyleSheet,
   Alert,
+  ScrollView,
 } from 'react-native';
 import { formatDate, calculateDueDate } from '../utils/dateUtils';
 import { COLORS, CURE_PERIODS } from '../constants';
 import DatePickerField from './DatePickerField';
 import PhotoAttachmentField from './PhotoAttachmentField';
+import { MediaService } from '../services/mediaService';
 
 const MODES = {
   create: 'create',
@@ -29,7 +31,8 @@ const AddSampleModal = ({
   const [sampleName, setSampleName] = useState('');
   const [cureDays, setCureDays] = useState(28);
   const [startDate, setStartDate] = useState(new Date());
-  const [photoUri, setPhotoUri] = useState(null);
+  const [photo, setPhoto] = useState(null);
+  const originalPhotoUriRef = useRef(null);
   const isEdit = mode === MODES.edit;
 
   useEffect(() => {
@@ -41,7 +44,8 @@ const AddSampleModal = ({
       setSampleName(initialSample.name ?? '');
       setCureDays(initialSample.cureDays ?? 28);
       setStartDate(initialSample.cureDate ? new Date(initialSample.cureDate) : new Date());
-      setPhotoUri(initialSample.photoUri ?? null);
+      setPhoto(initialSample.photoUri ? { uri: initialSample.photoUri, size: null, isNew: false } : null);
+      originalPhotoUriRef.current = initialSample.photoUri ?? null;
     } else {
       resetForm();
     }
@@ -64,6 +68,8 @@ const AddSampleModal = ({
     const createdAt = isEdit && initialSample?.createdAt
       ? new Date(initialSample.createdAt)
       : new Date();
+    const finalPhotoUri = photo?.uri ?? null;
+
     const sample = {
       id: initialSample?.id ?? Date.now().toString(),
       name: sampleName.trim(),
@@ -72,7 +78,7 @@ const AddSampleModal = ({
       dueDate: dueDate.toISOString(),
       completed: initialSample?.completed ?? false,
       createdAt: createdAt.toISOString(),
-      photoUri: photoUri ?? null,
+      photoUri: finalPhotoUri,
     };
 
     try {
@@ -85,6 +91,12 @@ const AddSampleModal = ({
       if (result === false) {
         return;
       }
+
+      if (originalPhotoUriRef.current && originalPhotoUriRef.current !== finalPhotoUri) {
+        await MediaService.deletePhoto(originalPhotoUriRef.current);
+      }
+
+      originalPhotoUriRef.current = finalPhotoUri;
       handleClose();
     } catch (error) {
       console.error('Numune kaydedilemedi:', error);
@@ -95,13 +107,34 @@ const AddSampleModal = ({
     setSampleName('');
     setCureDays(28);
     setStartDate(new Date());
-    setPhotoUri(null);
+    setPhoto(null);
+    originalPhotoUriRef.current = null;
   };
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
+    if (photo?.isNew && photo?.uri && photo?.uri !== originalPhotoUriRef.current) {
+      MediaService.deletePhoto(photo.uri).catch(() => {});
+    }
+
     resetForm();
     onClose();
-  };
+  }, [onClose, photo]);
+
+  const handlePhotoChange = useCallback((nextPhoto) => {
+    if (nextPhoto) {
+      if (photo?.isNew && photo.uri && photo.uri !== nextPhoto.uri) {
+        MediaService.deletePhoto(photo.uri).catch(() => {});
+      }
+      setPhoto({ ...nextPhoto, isNew: true });
+      return;
+    }
+
+    if (photo?.isNew && photo.uri) {
+      MediaService.deletePhoto(photo.uri).catch(() => {});
+    }
+
+    setPhoto(null);
+  }, [photo]);
 
   return (
     <Modal
@@ -119,7 +152,11 @@ const AddSampleModal = ({
             </TouchableOpacity>
           </View>
 
-          <View style={styles.content}>
+          <ScrollView
+            style={styles.content}
+            contentContainerStyle={styles.contentContainer}
+            showsVerticalScrollIndicator={false}
+          >
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Numune Adı</Text>
               <TextInput
@@ -145,7 +182,7 @@ const AddSampleModal = ({
               </Text>
             </View>
 
-            <PhotoAttachmentField value={photoUri} onChange={setPhotoUri} />
+            <PhotoAttachmentField value={photo} onChange={handlePhotoChange} />
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Kür Süresi</Text>
@@ -193,10 +230,10 @@ const AddSampleModal = ({
               </Text>
               <Text style={styles.summaryText}>
                 <Text style={styles.summaryLabel}>Fotoğraf: </Text>
-                {photoUri ? 'Eklendi' : 'Yok'}
+                {photo?.uri ? 'Eklendi' : 'Yok'}
               </Text>
             </View>
-          </View>
+          </ScrollView>
 
           <View style={styles.footer}>
             <TouchableOpacity
@@ -257,7 +294,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   content: {
+    maxHeight: '75%',
+  },
+  contentContainer: {
     padding: 20,
+    paddingBottom: 32,
   },
   inputGroup: {
     marginBottom: 20,
