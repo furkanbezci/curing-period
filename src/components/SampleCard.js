@@ -135,8 +135,8 @@ const SampleCard = ({ sample, onToggleComplete, onDelete, onEdit, onCapturePhoto
               <ActivityIndicator color={COLORS.primary} />
             ) : (
               <>
-                <Text style={styles.photoPlaceholderIcon}>📷</Text>
-                <Text style={styles.photoPlaceholderText}>Kamerayı aç</Text>
+                <Feather name="camera" size={28} color={COLORS.gray[400]} />
+                <Text style={styles.photoPlaceholderText}>Fotoğraf eklenmedi</Text>
               </>
             )}
           </TouchableOpacity>

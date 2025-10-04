@@ -27,7 +27,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   hero: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: '#EEF2FF',
     borderRadius: 24,
     paddingVertical: 20,
     paddingHorizontal: 24,
@@ -36,7 +36,7 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     fontSize: 22,
-    color: COLORS.white,
+    color: COLORS.primary,
     fontWeight: '700',
   },
   sectionTitle: {
