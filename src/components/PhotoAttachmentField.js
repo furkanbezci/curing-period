@@ -6,9 +6,9 @@ import {
   StyleSheet,
   Image,
   ActivityIndicator,
-  Modal,
-  TouchableWithoutFeedback,
+  Alert,
 } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import { COLORS } from '../constants';
 import { MediaService } from '../services/mediaService';
 
@@ -26,31 +26,51 @@ const formatBytes = (bytes) => {
 
 const PhotoAttachmentField = ({ value, onChange }) => {
   const [loading, setLoading] = useState(false);
-  const [sheetVisible, setSheetVisible] = useState(false);
 
   const handleResult = async (action) => {
     setLoading(true);
     try {
       const result = await action();
+      if (result?.reason === 'permission_denied') {
+        Alert.alert('İzin Gerekli', 'Fotoğraf eklemek için gerekli izinleri vermelisiniz.');
+        return;
+      }
+
+      if (result?.reason === 'camera_unavailable') {
+        Alert.alert('Kamera Kullanılamıyor', 'Bu cihazda kamera bulunmuyor veya şu anda erişilemiyor.');
+        return;
+      }
+
       if (!result.cancelled && result.uri) {
         onChange({ uri: result.uri, size: result.size ?? null, isNew: true });
       }
     } catch (error) {
       console.error('Fotoğraf işlemi başarısız:', error);
+      Alert.alert('Fotoğraf', 'Fotoğraf eklenemedi. Lütfen tekrar deneyin.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleTakePhoto = () => handleResult(() => MediaService.capturePhoto());
-  const handlePickPhoto = () => handleResult(() => MediaService.pickImage());
+  const handleTakePhoto = () => {
+    if (loading) {
+      return;
+    }
+
+    handleResult(() => MediaService.capturePhoto());
+  };
+
+  const handlePickPhoto = () => {
+    if (loading) {
+      return;
+    }
+
+    handleResult(() => MediaService.pickImage());
+  };
 
   const handleRemovePhoto = () => {
     onChange(null);
   };
-
-  const openSheet = () => setSheetVisible(true);
-  const closeSheet = () => setSheetVisible(false);
 
   return (
     <View style={styles.container}>
@@ -65,28 +85,38 @@ const PhotoAttachmentField = ({ value, onChange }) => {
             <ActivityIndicator color={COLORS.primary} />
           ) : value?.uri ? (
             <>
-              <View style={styles.previewImageWrapper}>
+              <TouchableOpacity
+                style={styles.previewImageWrapper}
+                onPress={handleTakePhoto}
+                activeOpacity={0.8}
+                disabled={loading}
+              >
                 <Image source={{ uri: value.uri }} style={styles.previewImage} />
-              </View>
+              </TouchableOpacity>
               {value.size ? (
                 <Text style={styles.sizeText}>{formatBytes(value.size)}</Text>
               ) : null}
             </>
           ) : (
-            <View style={styles.placeholder}>
-              <Text style={styles.placeholderIcon}>📷</Text>
+            <TouchableOpacity
+              style={styles.placeholder}
+              onPress={handleTakePhoto}
+              activeOpacity={0.75}
+              disabled={loading}
+            >
+              <Feather name="camera" size={32} color={COLORS.gray[400]} />
               <Text style={styles.placeholderText}>Fotoğraf eklenmedi</Text>
-            </View>
+            </TouchableOpacity>
           )}
         </View>
 
         <TouchableOpacity
-          style={styles.actionFab}
-          onPress={openSheet}
+          style={styles.iconButton}
+          onPress={handlePickPhoto}
           disabled={loading}
-          activeOpacity={0.85}
+          activeOpacity={0.8}
         >
-          <Text style={styles.actionFabIcon}>{value?.uri ? '✏️' : '➕'}</Text>
+          <Feather name="image" size={22} color={COLORS.gray[500]} />
         </TouchableOpacity>
       </View>
 
@@ -96,53 +126,6 @@ const PhotoAttachmentField = ({ value, onChange }) => {
         </TouchableOpacity>
       ) : null}
 
-      <Modal
-        visible={sheetVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={closeSheet}
-      >
-        <TouchableWithoutFeedback onPress={closeSheet}>
-          <View style={styles.sheetOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={styles.sheetContainer}>
-                <Text style={styles.sheetTitle}>Fotoğraf Ekle</Text>
-                <Text style={styles.sheetSubtitle}>Yeni çekebilir ya da galeriden seçebilirsin</Text>
-
-                <View style={styles.sheetActions}>
-                  <TouchableOpacity
-                    style={[styles.sheetButton, styles.sheetButtonPrimary]}
-                    onPress={() => {
-                      closeSheet();
-                      handleTakePhoto();
-                    }}
-                    disabled={loading}
-                  >
-                    <Text style={styles.sheetButtonIcon}>📸</Text>
-                    <Text style={styles.sheetButtonText}>Kamera</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[styles.sheetButton, styles.sheetButtonSecondary]}
-                    onPress={() => {
-                      closeSheet();
-                      handlePickPhoto();
-                    }}
-                    disabled={loading}
-                  >
-                    <Text style={styles.sheetButtonIcon}>🖼️</Text>
-                    <Text style={styles.sheetButtonText}>Galeri</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <TouchableOpacity style={styles.sheetCancel} onPress={closeSheet}>
-                  <Text style={styles.sheetCancelText}>İptal</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
     </View>
   );
 };
@@ -201,10 +184,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
   },
-  placeholderIcon: {
-    fontSize: 28,
-    color: COLORS.gray[400],
-  },
   placeholderText: {
     fontSize: 12,
     color: COLORS.gray[500],
@@ -214,22 +193,18 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: COLORS.gray[500],
   },
-  actionFab: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: COLORS.primary,
-    justifyContent: 'center',
+  iconButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
     alignItems: 'center',
+    justifyContent: 'center',
     shadowColor: COLORS.dark,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 4,
-  },
-  actionFabIcon: {
-    fontSize: 22,
-    color: COLORS.white,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 5,
+    elevation: 3,
+    backgroundColor: COLORS.gray[200],
   },
   removeBadge: {
     alignSelf: 'flex-start',
@@ -241,63 +216,6 @@ const styles = StyleSheet.create({
   removeBadgeText: {
     fontSize: 13,
     color: COLORS.danger,
-    fontWeight: '600',
-  },
-  sheetOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-end',
-  },
-  sheetContainer: {
-    backgroundColor: COLORS.white,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
-    gap: 12,
-  },
-  sheetTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.dark,
-  },
-  sheetSubtitle: {
-    fontSize: 14,
-    color: COLORS.gray[500],
-  },
-  sheetActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginTop: 8,
-  },
-  sheetButton: {
-    flex: 1,
-    borderRadius: 16,
-    paddingVertical: 16,
-    alignItems: 'center',
-    gap: 6,
-  },
-  sheetButtonPrimary: {
-    backgroundColor: '#EEF2FF',
-  },
-  sheetButtonSecondary: {
-    backgroundColor: COLORS.gray[100],
-  },
-  sheetButtonIcon: {
-    fontSize: 24,
-  },
-  sheetButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.dark,
-  },
-  sheetCancel: {
-    marginTop: 4,
-    alignSelf: 'center',
-  },
-  sheetCancelText: {
-    fontSize: 16,
-    color: COLORS.gray[600],
     fontWeight: '600',
   },
 });

@@ -7,7 +7,7 @@ import UpcomingSampleCard from './UpcomingSampleCard';
 const SampleListHeader = ({ stats, upcomingSample, upcomingStatus }) => (
   <View style={styles.container}>
     <View style={styles.hero}>
-      <Text style={styles.heroTitle}>Şantiye Kontrol Paneli</Text>
+      <Text style={styles.heroTitle}>Beton Kür Kontrol Paneli</Text>
     </View>
 
     <StatsOverview stats={stats} />

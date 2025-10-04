@@ -42,7 +42,9 @@ async function saveToDeviceLibrary(uri) {
   }
 
   try {
-    const { status } = await MediaLibrary.requestPermissionsAsync();
+    const { status } = await MediaLibrary.requestPermissionsAsync({
+      mediaTypes: MediaLibrary.MediaTypeOptions.Images,
+    });
     if (status !== 'granted') {
       return;
     }
@@ -106,18 +108,27 @@ export class MediaService {
   }
 
   static async capturePhoto(options = {}) {
-  const hasPermission = await this.ensureCameraPermission();
-  if (!hasPermission) {
-    return { cancelled: true, reason: 'permission_denied' };
-  }
+    const hasPermission = await this.ensureCameraPermission();
+    if (!hasPermission) {
+      return { cancelled: true, reason: 'permission_denied' };
+    }
 
-    const result = await ImagePicker.launchCameraAsync({
-      quality: 0.7,
-      allowsEditing: false,
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      saveToPhotos: true,
-      ...options,
-    });
+    let result;
+    try {
+      result = await ImagePicker.launchCameraAsync({
+        quality: 0.7,
+        allowsEditing: false,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        saveToPhotos: true,
+        ...options,
+      });
+    } catch (error) {
+      const message = error?.message ?? '';
+      if (message.toLowerCase().includes('camera') && message.toLowerCase().includes('available')) {
+        return { cancelled: true, reason: 'camera_unavailable' };
+      }
+      throw error;
+    }
 
     if (result.canceled) {
       return { cancelled: true };

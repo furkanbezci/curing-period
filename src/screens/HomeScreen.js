@@ -16,6 +16,7 @@ import SampleEmptyState from '../components/SampleEmptyState';
 import { StorageService } from '../services/storageService';
 import { NotificationService } from '../services/notificationService';
 import { MediaService } from '../services/mediaService';
+import { CalendarService } from '../services/calendarService';
 import { COLORS } from '../constants';
 import { getRemainingTime } from '../utils/dateUtils';
 
@@ -25,6 +26,7 @@ const HomeScreen = () => {
   const [modalMode, setModalMode] = useState('create');
   const [editingSample, setEditingSample] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [calendarPermissionGranted, setCalendarPermissionGranted] = useState(false);
 
   useEffect(() => {
     initializeApp();
@@ -43,6 +45,12 @@ const HomeScreen = () => {
       }
 
       await loadSamples();
+
+      const calendarGranted = await CalendarService.requestPermissions();
+      setCalendarPermissionGranted(calendarGranted);
+      if (!calendarGranted) {
+        console.warn('Takvim izni verilmedi.');
+      }
     } catch (error) {
       console.error('Uygulama başlatma hatası:', error);
       Alert.alert('Hata', 'Uygulama başlatılamadı.');
@@ -74,9 +82,25 @@ const HomeScreen = () => {
         sample.dueDate
       );
 
+      let calendarEventId = sample.calendarEventId ?? null;
+      let calendarSyncEnabled = Boolean(sample.calendarSyncEnabled);
+
+      if (calendarSyncEnabled) {
+        calendarEventId = await CalendarService.createEvent(sample);
+        if (!calendarEventId) {
+          calendarSyncEnabled = false;
+          Alert.alert(
+            'Takvim Uyarısı',
+            'Takvim etkinliği oluşturulamadı. İsterseniz daha sonra tekrar deneyebilirsiniz.'
+          );
+        }
+      }
+
       const sampleWithNotification = {
         ...sample,
         notificationIds,
+        calendarEventId,
+        calendarSyncEnabled,
       };
 
       let updatedSamples = [];
@@ -128,6 +152,10 @@ const HomeScreen = () => {
                 await NotificationService.cancelNotification(sample.notificationIds ?? sample.notificationId);
               }
 
+              if (sample?.calendarEventId) {
+                await CalendarService.deleteEvent(sample.calendarEventId);
+              }
+
               if (sample?.photoUri) {
                 await MediaService.deletePhoto(sample.photoUri);
               }
@@ -165,6 +193,29 @@ const HomeScreen = () => {
         updatedSample.dueDate
       );
 
+      let calendarEventId = existing.calendarEventId ?? null;
+      let calendarSyncEnabled = Boolean(updatedSample.calendarSyncEnabled);
+
+      if (calendarSyncEnabled) {
+        const updatedId = await CalendarService.updateEvent(calendarEventId, updatedSample);
+        if (updatedId) {
+          calendarEventId = updatedId;
+        } else {
+          calendarEventId = await CalendarService.createEvent(updatedSample);
+        }
+
+        if (!calendarEventId) {
+          calendarSyncEnabled = false;
+          Alert.alert(
+            'Takvim Uyarısı',
+            'Takvim güncellenemedi. Etkinlik bağlantısı kapatıldı.'
+          );
+        }
+      } else if (calendarEventId) {
+        await CalendarService.deleteEvent(calendarEventId);
+        calendarEventId = null;
+      }
+
       let nextSamples = [];
       setSamples((prev) => {
         nextSamples = prev.map(sample => {
@@ -173,7 +224,13 @@ const HomeScreen = () => {
           }
 
           const { notificationId: _legacyId, notificationIds: _legacyIds, ...rest } = sample;
-          return { ...rest, ...updatedSample, notificationIds };
+          return {
+            ...rest,
+            ...updatedSample,
+            notificationIds,
+            calendarEventId,
+            calendarSyncEnabled,
+          };
         });
         return nextSamples;
       });
@@ -185,6 +242,45 @@ const HomeScreen = () => {
       console.error('Numune güncelleme hatası:', error);
       Alert.alert('Hata', 'Numune güncellenirken bir hata oluştu.');
       return false;
+    }
+  }, [samples]);
+
+  const handleCapturePhoto = useCallback(async (targetSample) => {
+    try {
+      const result = await MediaService.capturePhoto();
+
+      if (result.cancelled) {
+        if (result.reason === 'permission_denied') {
+          Alert.alert('Kamera İzni', 'Kamera erişimi olmadan fotoğraf ekleyemezsiniz.');
+        } else if (result.reason === 'camera_unavailable') {
+          Alert.alert('Kamera Kullanılamıyor', 'Bu cihazda kamera bulunmuyor veya şu anda erişilemiyor.');
+        }
+        return;
+      }
+
+      const currentSample = samples.find(s => s.id === targetSample.id);
+      if (!currentSample) {
+        return;
+      }
+
+      const updatedSample = { ...currentSample, photoUri: result.uri };
+
+      let nextSamples = [];
+      setSamples(prev => {
+        nextSamples = prev.map(sample => (sample.id === updatedSample.id ? updatedSample : sample));
+        return nextSamples;
+      });
+
+      await StorageService.saveSamples(nextSamples);
+
+      if (currentSample.photoUri && currentSample.photoUri !== result.uri) {
+        await MediaService.deletePhoto(currentSample.photoUri);
+      }
+
+      Alert.alert('Fotoğraf', 'Fotoğraf eklendi.');
+    } catch (error) {
+      console.error('Fotoğraf yakalama hatası:', error);
+      Alert.alert('Fotoğraf', 'Fotoğraf eklenemedi. Lütfen tekrar deneyin.');
     }
   }, [samples]);
 
@@ -233,8 +329,9 @@ const HomeScreen = () => {
       onToggleComplete={handleToggleComplete}
       onDelete={handleDeleteSample}
       onEdit={openEditModal}
+      onCapturePhoto={handleCapturePhoto}
     />
-  ), [handleDeleteSample, handleToggleComplete, openEditModal]);
+  ), [handleCapturePhoto, handleDeleteSample, handleToggleComplete, openEditModal]);
 
   const keyExtractor = useCallback((item) => item.id, []);
 
@@ -295,6 +392,8 @@ const HomeScreen = () => {
           onUpdate={handleUpdateSample}
           mode={modalMode}
           initialSample={editingSample}
+          calendarPermissionsGranted={calendarPermissionGranted}
+          onCalendarPermissionChange={setCalendarPermissionGranted}
         />
       )}
     </SafeAreaView>

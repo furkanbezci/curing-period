@@ -8,12 +8,14 @@ import {
   StyleSheet,
   Alert,
   ScrollView,
+  Switch,
 } from 'react-native';
 import { formatDate, calculateDueDate } from '../utils/dateUtils';
 import { COLORS, CURE_PERIODS } from '../constants';
 import DatePickerField from './DatePickerField';
 import PhotoAttachmentField from './PhotoAttachmentField';
 import { MediaService } from '../services/mediaService';
+import { CalendarService } from '../services/calendarService';
 
 const MODES = {
   create: 'create',
@@ -27,11 +29,14 @@ const AddSampleModal = ({
   onUpdate,
   mode = MODES.create,
   initialSample = null,
+  calendarPermissionsGranted = false,
+  onCalendarPermissionChange,
 }) => {
   const [sampleName, setSampleName] = useState('');
   const [cureDays, setCureDays] = useState(28);
   const [startDate, setStartDate] = useState(new Date());
   const [photo, setPhoto] = useState(null);
+  const [calendarSyncEnabled, setCalendarSyncEnabled] = useState(calendarPermissionsGranted);
   const originalPhotoUriRef = useRef(null);
   const isEdit = mode === MODES.edit;
 
@@ -45,12 +50,19 @@ const AddSampleModal = ({
       setCureDays(initialSample.cureDays ?? 28);
       setStartDate(initialSample.cureDate ? new Date(initialSample.cureDate) : new Date());
       setPhoto(initialSample.photoUri ? { uri: initialSample.photoUri, size: null, isNew: false } : null);
+      setCalendarSyncEnabled(Boolean(initialSample.calendarSyncEnabled ?? initialSample.calendarEventId));
       originalPhotoUriRef.current = initialSample.photoUri ?? null;
     } else {
       resetForm();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, isEdit, initialSample]);
+
+  useEffect(() => {
+    if (!isEdit && visible) {
+      setCalendarSyncEnabled(calendarPermissionsGranted);
+    }
+  }, [calendarPermissionsGranted, isEdit, visible]);
 
   const handleSave = async () => {
     if (!sampleName.trim()) {
@@ -70,7 +82,7 @@ const AddSampleModal = ({
       : new Date();
     const finalPhotoUri = photo?.uri ?? null;
 
-    const sample = {
+    const draftSample = {
       id: initialSample?.id ?? Date.now().toString(),
       name: sampleName.trim(),
       cureDate: selectedStartDate.toISOString(),
@@ -79,7 +91,65 @@ const AddSampleModal = ({
       completed: initialSample?.completed ?? false,
       createdAt: createdAt.toISOString(),
       photoUri: finalPhotoUri,
+      calendarSyncEnabled,
+      calendarEventId: calendarSyncEnabled ? initialSample?.calendarEventId ?? null : null,
     };
+
+    if (calendarSyncEnabled) {
+      const dayEvents = await CalendarService.getEventsForDay(
+        draftSample,
+        draftSample.calendarEventId
+      );
+
+      if (dayEvents.length > 0) {
+        const previewItems = dayEvents
+          .slice(0, 3)
+          .map(event => {
+            const title = event.title || 'Etkinlik';
+            const timeLabel = event.allDay
+              ? 'Tüm gün'
+              : (() => {
+                  const startTime = new Date(event.startDate);
+                  const endTime = new Date(event.endDate);
+                  const startText = startTime.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+                  const endText = endTime.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+                  return `${startText} - ${endText}`;
+                })();
+            return `• ${title} (${timeLabel})`;
+          })
+          .join('\n');
+
+        const extraCount = Math.max(0, dayEvents.length - 3);
+        const preview = extraCount > 0
+          ? `${previewItems}\n• +${extraCount} etkinlik daha`
+          : previewItems;
+
+        const proceed = await new Promise(resolve => {
+          Alert.alert(
+            'Takvim Uyarısı',
+            `Kür bitiş günü takvimde başka etkinlik(ler) var:\n\n${preview}\n\nYine de devam etmek ister misiniz?`,
+            [
+              {
+                text: 'İptal',
+                style: 'cancel',
+                onPress: () => resolve(false),
+              },
+              {
+                text: 'Devam',
+                onPress: () => resolve(true),
+              },
+            ],
+            { cancelable: false }
+          );
+        });
+
+        if (!proceed) {
+          return;
+        }
+      }
+    }
+
+    const sample = draftSample;
 
     try {
       let result = true;
@@ -108,6 +178,7 @@ const AddSampleModal = ({
     setCureDays(28);
     setStartDate(new Date());
     setPhoto(null);
+    setCalendarSyncEnabled(calendarPermissionsGranted);
     originalPhotoUriRef.current = null;
   };
 
@@ -135,6 +206,21 @@ const AddSampleModal = ({
 
     setPhoto(null);
   }, [photo]);
+
+  const handleCalendarToggle = useCallback(async (nextValue) => {
+    if (nextValue) {
+      const granted = await CalendarService.ensurePermissionOrOpenSettings();
+      if (!granted) {
+        setCalendarSyncEnabled(false);
+        onCalendarPermissionChange?.(false);
+        return;
+      }
+
+      onCalendarPermissionChange?.(true);
+    }
+
+    setCalendarSyncEnabled(nextValue);
+  }, [onCalendarPermissionChange]);
 
   return (
     <Modal
@@ -165,7 +251,7 @@ const AddSampleModal = ({
                 onChangeText={setSampleName}
                 placeholder="Örn: C30/37 - Şantiye A - Numune 1"
                 placeholderTextColor={COLORS.gray[400]}
-                autoFocus
+                autoFocus={!isEdit}
               />
             </View>
 
@@ -232,6 +318,20 @@ const AddSampleModal = ({
                 <Text style={styles.summaryLabel}>Fotoğraf: </Text>
                 {photo?.uri ? 'Eklendi' : 'Yok'}
               </Text>
+              <View style={styles.calendarRow}>
+                <View style={styles.calendarInfo}>
+                  <Text style={styles.summaryLabel}>Takvime ekle</Text>
+                  <Text style={styles.calendarHelpText}>
+                    Etkinlik olarak kaydedip 12 ve 2 saat önce hatırlat
+                  </Text>
+                </View>
+                <Switch
+                  value={calendarSyncEnabled}
+                  onValueChange={handleCalendarToggle}
+                  trackColor={{ false: COLORS.gray[300], true: COLORS.primary }}
+                  thumbColor={calendarSyncEnabled ? COLORS.white : COLORS.white}
+                />
+              </View>
             </View>
           </ScrollView>
 
@@ -369,6 +469,24 @@ const styles = StyleSheet.create({
   summaryLabel: {
     fontWeight: '500',
     color: COLORS.gray[600],
+  },
+  calendarRow: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.gray[200],
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  calendarInfo: {
+    flex: 1,
+    marginRight: 12,
+  },
+  calendarHelpText: {
+    fontSize: 12,
+    color: COLORS.gray[500],
+    marginTop: 2,
   },
   footer: {
     flexDirection: 'row',

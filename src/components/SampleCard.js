@@ -8,35 +8,68 @@ import {
   Modal,
   TouchableWithoutFeedback,
   Alert,
+  ActivityIndicator,
+  Pressable,
 } from 'react-native';
 import { formatDate, getStatusInfo } from '../utils/dateUtils';
 import { COLORS } from '../constants';
 import { MediaService } from '../services/mediaService';
+import { Feather } from '@expo/vector-icons';
 
-const SampleCard = ({ sample, onToggleComplete, onDelete, onEdit }) => {
+const SampleCard = ({ sample, onToggleComplete, onDelete, onEdit, onCapturePhoto }) => {
   const statusInfo = getStatusInfo(sample.dueDate, sample.completed);
   const accentColor = statusInfo.color;
   const pillColor = `${accentColor}20`;
-  const [menuVisible, setMenuVisible] = useState(false);
   const [imageVisible, setImageVisible] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [capturing, setCapturing] = useState(false);
 
   const handleToggle = () => onToggleComplete(sample.id);
   const handleDelete = () => {
-    setMenuVisible(false);
     onDelete(sample.id);
   };
-  const handleEdit = () => {
-    setMenuVisible(false);
-    onEdit?.(sample);
+
+  const handleSaveImage = async () => {
+    if (!sample.photoUri) {
+      return;
+    }
+
+    try {
+      setSaving(true);
+      await MediaService.saveToDeviceLibrary(sample.photoUri);
+      Alert.alert('Galeri', 'Fotoğraf galeriye kaydedildi.');
+    } catch (error) {
+      console.error('Fotoğraf galeriye kaydedilemedi:', error);
+      Alert.alert('Galeri', 'Fotoğraf kaydedilemedi.');
+    } finally {
+      setSaving(false);
+    }
   };
-console.log(sample)
+
+  const handleCapturePress = async () => {
+    if (!onCapturePhoto || capturing) {
+      return;
+    }
+
+    try {
+      setCapturing(true);
+      await onCapturePhoto(sample);
+    } catch (error) {
+      console.error('Fotoğraf eklenemedi:', error);
+      Alert.alert('Fotoğraf', 'Fotoğraf eklenemedi. Lütfen tekrar deneyin.');
+    } finally {
+      setCapturing(false);
+    }
+  };
+  const Container = onEdit ? Pressable : View;
+
   return (
-    <View
+    <Container
       style={[
         styles.card,
         { borderColor: `${accentColor}55`, backgroundColor: sample.completed ? '#F5FFF8' : COLORS.white },
       ]}
+      onPress={onEdit ? () => onEdit(sample) : undefined}
     >
       <View style={styles.headerRow}>
         <View style={styles.titleBlock}>
@@ -63,64 +96,82 @@ console.log(sample)
         </View>
 
         {sample.photoUri ? (
-          <TouchableOpacity onPress={() => setImageVisible(true)} activeOpacity={0.85}>
-            <Image source={{ uri: sample.photoUri }} style={styles.detailPhoto} />
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.detailPhotoPlaceholder}>
-            <Text style={styles.photoPlaceholderIcon}>📷</Text>
-            <Text style={styles.photoPlaceholderText}>Fotoğraf yok</Text>
+          <View style={styles.photoWrapper}>
+            <TouchableOpacity
+              onPress={(event) => {
+                event.stopPropagation?.();
+                setImageVisible(true);
+              }}
+              activeOpacity={0.85}
+            >
+              <Image source={{ uri: sample.photoUri }} style={styles.detailPhoto} />
+            </TouchableOpacity>
+
+            {onCapturePhoto ? (
+              <TouchableOpacity
+                style={styles.retakeButton}
+                onPress={(event) => {
+                  event.stopPropagation?.();
+                  handleCapturePress();
+                }}
+                disabled={capturing}
+                activeOpacity={0.75}
+              >
+                <Feather name="camera" size={16} color={COLORS.white} />
+              </TouchableOpacity>
+            ) : null}
           </View>
+        ) : (
+          <TouchableOpacity
+            style={styles.detailPhotoPlaceholder}
+            onPress={(event) => {
+              event.stopPropagation?.();
+              handleCapturePress();
+            }}
+            activeOpacity={0.75}
+            disabled={capturing}
+          >
+            {capturing ? (
+              <ActivityIndicator color={COLORS.primary} />
+            ) : (
+              <>
+                <Text style={styles.photoPlaceholderIcon}>📷</Text>
+                <Text style={styles.photoPlaceholderText}>Kamerayı aç</Text>
+              </>
+            )}
+          </TouchableOpacity>
         )}
       </View>
 
       <View style={styles.actions}>
         <TouchableOpacity
           style={[styles.actionButton, sample.completed ? styles.completedAction : styles.primaryAction]}
-          onPress={handleToggle}
+          onPress={(event) => {
+            event.stopPropagation?.();
+            handleToggle();
+          }}
           activeOpacity={0.85}
         >
-          <Text style={[styles.actionButtonText, sample.completed && styles.completedActionText]}>
-            {sample.completed ? '✓ Tamamlandı' : '✔︎ Takipte'}
-          </Text>
+          {sample.completed ? (
+            <Text style={[styles.actionButtonText, styles.completedActionText]}>✓ Tamamlandı</Text>
+          ) : (
+            <Text style={styles.actionButtonText}>✔︎ Takipte</Text>
+          )}
         </TouchableOpacity>
 
-        {(onEdit || onDelete) && (
+        {onDelete ? (
           <TouchableOpacity
-            style={styles.menuTrigger}
-            onPress={() => setMenuVisible(true)}
-            activeOpacity={0.8}
+            style={styles.deleteButton}
+            onPress={(event) => {
+              event.stopPropagation?.();
+              handleDelete();
+            }}
+            activeOpacity={0.75}
           >
-            <Text style={styles.menuTriggerText}>⋮</Text>
+            <Feather name="trash-2" size={18} color={COLORS.danger} />
           </TouchableOpacity>
-        )}
+        ) : null}
       </View>
-
-      <Modal
-        transparent
-        visible={menuVisible}
-        animationType="fade"
-        onRequestClose={() => setMenuVisible(false)}
-      >
-        <TouchableWithoutFeedback onPress={() => setMenuVisible(false)}>
-          <View style={styles.menuOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={styles.menuContainer}>
-                {onEdit ? (
-                  <TouchableOpacity style={styles.menuItem} onPress={handleEdit}>
-                    <Text style={styles.menuItemIcon}>✏️</Text>
-                    <Text style={styles.menuItemText}>Düzenle</Text>
-                  </TouchableOpacity>
-                ) : null}
-                <TouchableOpacity style={styles.menuItem} onPress={handleDelete}>
-                  <Text style={[styles.menuItemIcon, { color: COLORS.danger }]}>🗑️</Text>
-                  <Text style={[styles.menuItemText, { color: COLORS.danger }]}>Sil</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
 
       <Modal
         transparent
@@ -147,7 +198,7 @@ console.log(sample)
           </View>
         </TouchableWithoutFeedback>
       </Modal>
-    </View>
+    </Container>
   );
 };
 
@@ -202,6 +253,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  deleteButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.gray[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 12,
+  },
   detailCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -222,6 +282,20 @@ const styles = StyleSheet.create({
     height: 128,
     backgroundColor: COLORS.gray[100],
     borderRadius: 18,
+  },
+  photoWrapper: {
+    position: 'relative',
+  },
+  retakeButton: {
+    position: 'absolute',
+    right: 8,
+    bottom: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   detailPhotoPlaceholder: {
     width: 128,
@@ -300,50 +374,6 @@ const styles = StyleSheet.create({
   completedActionText: {
     color: COLORS.white,
   },
-  menuTrigger: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.gray[200],
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.white,
-  },
-  menuTriggerText: {
-    fontSize: 20,
-    color: COLORS.gray[600],
-  },
-  menuOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.2)',
-    justifyContent: 'flex-end',
-    padding: 16,
-  },
-  menuContainer: {
-    backgroundColor: COLORS.white,
-    borderRadius: 16,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    gap: 4,
-  },
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 6,
-    borderRadius: 10,
-  },
-  menuItemIcon: {
-    fontSize: 18,
-    color: COLORS.gray[600],
-  },
-  menuItemText: {
-    fontSize: 14,
-    color: COLORS.dark,
-    fontWeight: '600',
-  },
   imageOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.7)',
@@ -391,19 +421,3 @@ const styles = StyleSheet.create({
 });
 
 export default SampleCard;
-  const handleSaveImage = async () => {
-    if (!sample.photoUri) {
-      return;
-    }
-
-    try {
-      setSaving(true);
-      await MediaService.saveToDeviceLibrary(sample.photoUri);
-      Alert.alert('Galeri', 'Fotoğraf galeriye kaydedildi.');
-    } catch (error) {
-      console.error('Fotoğraf galeriye kaydedilemedi:', error);
-      Alert.alert('Galeri', 'Fotoğraf kaydedilemedi.');
-    } finally {
-      setSaving(false);
-    }
-  };
