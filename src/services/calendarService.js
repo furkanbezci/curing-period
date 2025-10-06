@@ -73,9 +73,16 @@ export class CalendarService {
     startDate.setHours(0, 0, 0, 0);
     const endDate = new Date(startDate);
     endDate.setDate(endDate.getDate() + 1);
+
+    if (Platform.OS === 'android') {
+      const timezoneOffset = startDate.getTimezoneOffset();
+      // Android treats all-day event times as UTC; normalize so the day stays intact
+      startDate.setMinutes(startDate.getMinutes() - timezoneOffset);
+      endDate.setMinutes(endDate.getMinutes() - timezoneOffset);
+    }
     const alarms = [
-      { relativeOffset: -720 },
-      { relativeOffset: -120 },
+      { relativeOffset: -1440 },
+      { relativeOffset: 0 },
     ];
 
     const notes = [

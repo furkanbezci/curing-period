@@ -10,6 +10,7 @@ import {
   Alert,
   ActivityIndicator,
   Pressable,
+  Share,
 } from 'react-native';
 import { formatDate, getStatusInfo } from '../utils/dateUtils';
 import { COLORS } from '../constants';
@@ -43,6 +44,22 @@ const SampleCard = ({ sample, onToggleComplete, onDelete, onEdit, onCapturePhoto
       Alert.alert('Galeri', 'Fotoğraf kaydedilemedi.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleShareImage = async () => {
+    if (!sample.photoUri) {
+      return;
+    }
+
+    try {
+      await Share.share({
+        url: sample.photoUri,
+        message: `${sample.name} fotoğrafı`,
+      });
+    } catch (error) {
+      console.error('Fotoğraf paylaşılamadı:', error);
+      Alert.alert('Paylaşım', 'Fotoğraf paylaşılamadı.');
     }
   };
 
@@ -183,15 +200,23 @@ const SampleCard = ({ sample, onToggleComplete, onDelete, onEdit, onCapturePhoto
           <View style={styles.imageOverlay}>
             <TouchableWithoutFeedback>
               <View style={styles.imageModalContainer}>
-                <TouchableOpacity
-                  style={styles.saveButton}
-                  onPress={handleSaveImage}
-                  disabled={saving}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.saveButtonIcon}>💾</Text>
-                  <Text style={styles.saveButtonText}>{saving ? 'Kaydediliyor...' : 'Galeriye Kaydet'}</Text>
-                </TouchableOpacity>
+                <View style={styles.imageModalActions}>
+                  <TouchableOpacity
+                    style={styles.roundButton}
+                    onPress={handleShareImage}
+                    activeOpacity={0.85}
+                  >
+                    <Feather name="share-2" size={18} color={COLORS.dark} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.roundButton, styles.roundButtonSecondary]}
+                    onPress={handleSaveImage}
+                    disabled={saving}
+                    activeOpacity={0.85}
+                  >
+                    <Feather name="download" size={18} color={COLORS.dark} />
+                  </TouchableOpacity>
+                </View>
                 <Image source={{ uri: sample.photoUri }} style={styles.imageModalPhoto} />
               </View>
             </TouchableWithoutFeedback>
@@ -397,26 +422,28 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
     resizeMode: 'contain',
   },
-  saveButton: {
+  imageModalActions: {
     position: 'absolute',
     top: 16,
     right: 16,
     flexDirection: 'row',
+    gap: 10,
+  },
+  roundButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.white,
     alignItems: 'center',
-    gap: 6,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderRadius: 999,
+    justifyContent: 'center',
+    shadowColor: COLORS.dark,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 4,
   },
-  saveButtonIcon: {
-    fontSize: 16,
-    color: COLORS.white,
-  },
-  saveButtonText: {
-    fontSize: 13,
-    color: COLORS.white,
-    fontWeight: '600',
+  roundButtonSecondary: {
+    backgroundColor: COLORS.gray[100],
   },
 });
 
