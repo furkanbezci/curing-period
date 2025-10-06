@@ -1,5 +1,6 @@
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
+import { Platform, PermissionsAndroid } from 'react-native';
 
 let FileSystem;
 
@@ -36,22 +37,109 @@ async function ensureSampleDir() {
   }
 }
 
-async function saveToDeviceLibrary(uri) {
-  if (!MediaLibrary || !uri) {
-    return;
+async function ensureAndroidMediaPermission() {
+  if (Platform.OS !== 'android' || !PermissionsAndroid?.request) {
+    return true;
   }
 
   try {
-    const { status } = await MediaLibrary.requestPermissionsAsync({
-      mediaTypes: MediaLibrary.MediaTypeOptions.Images,
-    });
-    if (status !== 'granted') {
-      return;
+    const sdkInt = Platform.Version ?? 0;
+
+    if (sdkInt >= 33) {
+      const result = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES
+      );
+      return result === PermissionsAndroid.RESULTS.GRANTED;
     }
 
-    await MediaLibrary.saveToLibraryAsync(uri);
+    const permissions = [
+      PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
+      PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+    ].filter(Boolean);
+
+    if (!permissions.length) {
+      return true;
+    }
+
+    const results = await PermissionsAndroid.requestMultiple(permissions);
+    return permissions.every(perm => results?.[perm] === PermissionsAndroid.RESULTS.GRANTED);
+  } catch (error) {
+    console.error('Android galeri izni alınamadı:', error);
+    return false;
+  }
+}
+
+function hasMediaLibraryAccess(permission) {
+  if (!permission) {
+    return false;
+  }
+
+  if (permission.granted) {
+    return true;
+  }
+
+  const privilege = permission.accessPrivileges;
+  return privilege === 'limited' || privilege === 'addOnly';
+}
+
+async function ensureMediaLibraryAccess() {
+  if (!MediaLibrary) {
+    return false;
+  }
+
+  try {
+    if (typeof MediaLibrary.getPermissionsAsync === 'function') {
+      const current = await MediaLibrary.getPermissionsAsync();
+      if (hasMediaLibraryAccess(current)) {
+        return true;
+      }
+    }
+
+    if (Platform.OS === 'android') {
+      const androidGranted = await ensureAndroidMediaPermission();
+      if (!androidGranted) {
+        return false;
+      }
+
+      if (typeof MediaLibrary.getPermissionsAsync === 'function') {
+        const afterAndroid = await MediaLibrary.getPermissionsAsync();
+        if (hasMediaLibraryAccess(afterAndroid)) {
+          return true;
+        }
+      }
+    }
+
+    const requested = Platform.OS === 'ios'
+      ? await MediaLibrary.requestPermissionsAsync({ accessPrivileges: 'addOnly' })
+      : await MediaLibrary.requestPermissionsAsync();
+    return hasMediaLibraryAccess(requested);
+  } catch (error) {
+    console.error('Galeri izinleri alınamadı:', error);
+    return false;
+  }
+}
+
+async function saveToDeviceLibrary(uri) {
+  if (!MediaLibrary || !uri) {
+    return false;
+  }
+
+  const hasPermission = await ensureMediaLibraryAccess();
+  if (!hasPermission) {
+    return false;
+  }
+
+  try {
+    if (typeof MediaLibrary.saveToLibraryAsync === 'function') {
+      await MediaLibrary.saveToLibraryAsync(uri);
+      return true;
+    }
+
+    await MediaLibrary.createAssetAsync(uri);
+    return true;
   } catch (error) {
     console.error('Galeri kaydetme hatası:', error);
+    return false;
   }
 }
 
@@ -98,19 +186,25 @@ async function processAsset(asset) {
 
 export class MediaService {
   static async ensureCameraPermission() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    return status === ImagePicker.PermissionStatus.GRANTED;
+    const response = await ImagePicker.requestCameraPermissionsAsync();
+    return response?.granted ?? false;
   }
 
-  static async ensureMediaLibraryPermission() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    return status === ImagePicker.PermissionStatus.GRANTED;
+  static async ensureMediaLibraryPermission(writeOnly = true) {
+    const response = await ImagePicker.requestMediaLibraryPermissionsAsync(writeOnly);
+    return response?.granted ?? false;
   }
 
   static async capturePhoto(options = {}) {
-    const hasPermission = await this.ensureCameraPermission();
-    if (!hasPermission) {
+    const { saveToGallery = true, ...pickerOptions } = options;
+
+    const hasCameraPermission = await this.ensureCameraPermission();
+    if (!hasCameraPermission) {
       return { cancelled: true, reason: 'permission_denied' };
+    }
+
+    if (saveToGallery) {
+      await ensureMediaLibraryAccess();
     }
 
     let result;
@@ -119,8 +213,8 @@ export class MediaService {
         quality: 0.7,
         allowsEditing: false,
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        saveToPhotos: true,
-        ...options,
+        saveToPhotos: saveToGallery,
+        ...pickerOptions,
       });
     } catch (error) {
       const message = error?.message ?? '';
@@ -135,10 +229,16 @@ export class MediaService {
     }
 
     const asset = result.assets?.[0];
-    if (asset?.uri) {
-      await saveToDeviceLibrary(asset.uri);
+    const processed = await processAsset(asset);
+
+    if (!processed.cancelled && processed.uri && saveToGallery) {
+      const savedOriginal = asset?.uri ? await saveToDeviceLibrary(asset.uri) : false;
+      if (!savedOriginal && processed.uri !== asset?.uri) {
+        await saveToDeviceLibrary(processed.uri);
+      }
     }
-    return processAsset(asset);
+
+    return processed;
   }
 
   static async pickImage(options = {}) {

@@ -31,6 +31,8 @@ const AddSampleModal = ({
   initialSample = null,
   calendarPermissionsGranted = false,
   onCalendarPermissionChange,
+  saveToGalleryEnabled = true,
+  onSaveToGalleryChange,
 }) => {
   const [sampleName, setSampleName] = useState('');
   const [cureDays, setCureDays] = useState(28);
@@ -268,7 +270,12 @@ const AddSampleModal = ({
               </Text>
             </View>
 
-            <PhotoAttachmentField value={photo} onChange={handlePhotoChange} />
+            <PhotoAttachmentField
+              value={photo}
+              onChange={handlePhotoChange}
+              saveToGalleryEnabled={saveToGalleryEnabled}
+              onSaveToGalleryEnabledChange={onSaveToGalleryChange}
+            />
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Kür Süresi</Text>
@@ -322,7 +329,7 @@ const AddSampleModal = ({
                 <View style={styles.calendarInfo}>
                   <Text style={styles.summaryLabel}>Takvime ekle</Text>
                   <Text style={styles.calendarHelpText}>
-                    Etkinlik olarak kaydedip 12 ve 2 saat önce hatırlat
+                    Takvime ekleyip alarm kur.
                   </Text>
                 </View>
                 <Switch

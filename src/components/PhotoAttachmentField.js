@@ -7,6 +7,7 @@ import {
   Image,
   ActivityIndicator,
   Alert,
+  Switch,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { COLORS } from '../constants';
@@ -24,7 +25,12 @@ const formatBytes = (bytes) => {
   return `${value.toFixed(value > 10 ? 0 : 1)} ${units[index]}`;
 };
 
-const PhotoAttachmentField = ({ value, onChange }) => {
+const PhotoAttachmentField = ({
+  value,
+  onChange,
+  saveToGalleryEnabled = true,
+  onSaveToGalleryEnabledChange,
+}) => {
   const [loading, setLoading] = useState(false);
 
   const handleResult = async (action) => {
@@ -57,7 +63,7 @@ const PhotoAttachmentField = ({ value, onChange }) => {
       return;
     }
 
-    handleResult(() => MediaService.capturePhoto());
+    handleResult(() => MediaService.capturePhoto({ saveToGallery: saveToGalleryEnabled }));
   };
 
   const handlePickPhoto = () => {
@@ -125,6 +131,20 @@ const PhotoAttachmentField = ({ value, onChange }) => {
           <Text style={styles.removeBadgeText}>Fotoğrafı kaldır</Text>
         </TouchableOpacity>
       ) : null}
+
+      <View style={styles.preferenceRow}>
+        <View style={styles.preferenceTextBlock}>
+          <Text style={styles.preferenceLabel}>Galeride sakla</Text>
+          <Text style={styles.preferenceHint}>Fotoğrafı cihaz galerisine kaydet</Text>
+        </View>
+        <Switch
+          value={saveToGalleryEnabled}
+          onValueChange={onSaveToGalleryEnabledChange}
+          trackColor={{ false: COLORS.gray[300], true: COLORS.primary }}
+          thumbColor={COLORS.white}
+          disabled={loading}
+        />
+      </View>
 
     </View>
   );
@@ -217,6 +237,26 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.danger,
     fontWeight: '600',
+  },
+  preferenceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+  },
+  preferenceTextBlock: {
+    flex: 1,
+    gap: 2,
+    paddingRight: 12,
+  },
+  preferenceLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.dark,
+  },
+  preferenceHint: {
+    fontSize: 12,
+    color: COLORS.gray[500],
   },
 });
 

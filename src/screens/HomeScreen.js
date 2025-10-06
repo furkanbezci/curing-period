@@ -27,6 +27,7 @@ const HomeScreen = () => {
   const [editingSample, setEditingSample] = useState(null);
   const [loading, setLoading] = useState(true);
   const [calendarPermissionGranted, setCalendarPermissionGranted] = useState(false);
+  const [saveToGalleryEnabled, setSaveToGalleryEnabled] = useState(true);
 
   useEffect(() => {
     initializeApp();
@@ -45,6 +46,11 @@ const HomeScreen = () => {
       }
 
       await loadSamples();
+
+      const storedSettings = await StorageService.loadSettings();
+      if (storedSettings && typeof storedSettings.saveToGalleryEnabled === 'boolean') {
+        setSaveToGalleryEnabled(storedSettings.saveToGalleryEnabled);
+      }
 
       const calendarGranted = await CalendarService.requestPermissions();
       setCalendarPermissionGranted(calendarGranted);
@@ -245,9 +251,22 @@ const HomeScreen = () => {
     }
   }, [samples]);
 
+  const handleSaveToGalleryChange = useCallback(async (enabled) => {
+    setSaveToGalleryEnabled(enabled);
+    try {
+      const currentSettings = await StorageService.loadSettings();
+      await StorageService.saveSettings({
+        ...currentSettings,
+        saveToGalleryEnabled: enabled,
+      });
+    } catch (error) {
+      console.error('Galeri tercihi kaydedilemedi:', error);
+    }
+  }, []);
+
   const handleCapturePhoto = useCallback(async (targetSample) => {
     try {
-      const result = await MediaService.capturePhoto();
+      const result = await MediaService.capturePhoto({ saveToGallery: saveToGalleryEnabled });
 
       if (result.cancelled) {
         if (result.reason === 'permission_denied') {
@@ -282,7 +301,7 @@ const HomeScreen = () => {
       console.error('Fotoğraf yakalama hatası:', error);
       Alert.alert('Fotoğraf', 'Fotoğraf eklenemedi. Lütfen tekrar deneyin.');
     }
-  }, [samples]);
+  }, [samples, saveToGalleryEnabled]);
 
   const openCreateModal = useCallback(() => {
     setModalMode('create');
@@ -394,6 +413,8 @@ const HomeScreen = () => {
           initialSample={editingSample}
           calendarPermissionsGranted={calendarPermissionGranted}
           onCalendarPermissionChange={setCalendarPermissionGranted}
+          saveToGalleryEnabled={saveToGalleryEnabled}
+          onSaveToGalleryChange={handleSaveToGalleryChange}
         />
       )}
     </SafeAreaView>
