@@ -29,6 +29,18 @@ const HomeScreen = () => {
   const [calendarPermissionGranted, setCalendarPermissionGranted] = useState(false);
   const [saveToGalleryEnabled, setSaveToGalleryEnabled] = useState(true);
 
+  const persistSaveToGalleryPreference = useCallback(async (enabled) => {
+    try {
+      const currentSettings = await StorageService.loadSettings();
+      await StorageService.saveSettings({
+        ...currentSettings,
+        saveToGalleryEnabled: enabled,
+      });
+    } catch (error) {
+      console.error('Galeri tercihi kaydedilemedi:', error);
+    }
+  }, []);
+
   useEffect(() => {
     initializeApp();
   }, []);
@@ -47,12 +59,31 @@ const HomeScreen = () => {
 
       await loadSamples();
 
-      const storedSettings = await StorageService.loadSettings();
-      if (storedSettings && typeof storedSettings.saveToGalleryEnabled === 'boolean') {
-        setSaveToGalleryEnabled(storedSettings.saveToGalleryEnabled);
+      const storedSettings = (await StorageService.loadSettings()) || {};
+      let initialSavePreference = typeof storedSettings.saveToGalleryEnabled === 'boolean'
+        ? storedSettings.saveToGalleryEnabled
+        : true;
+
+      if (initialSavePreference) {
+        try {
+          const galleryStatus = await MediaService.getSaveToGalleryAccessStatus();
+          if (!galleryStatus.granted) {
+            initialSavePreference = false;
+            await StorageService.saveSettings({
+              ...storedSettings,
+              saveToGalleryEnabled: false,
+            });
+          }
+        } catch (error) {
+          console.error('Galeri izin durumu kontrol edilemedi:', error);
+          initialSavePreference = false;
+        }
       }
 
+      setSaveToGalleryEnabled(initialSavePreference);
+
       const calendarGranted = await CalendarService.requestPermissions();
+      console.log("√calendarGranted",calendarGranted)
       setCalendarPermissionGranted(calendarGranted);
       if (!calendarGranted) {
         console.warn('Takvim izni verilmedi.');
@@ -82,7 +113,7 @@ const HomeScreen = () => {
         sample.dueDate
       );
 
-      await NotificationService.scheduleTestHourReminder(
+      const testReminderId = await NotificationService.scheduleTestHourReminder(
         sample.id,
         sample.name,
         sample.dueDate
@@ -105,6 +136,7 @@ const HomeScreen = () => {
       const sampleWithNotification = {
         ...sample,
         notificationIds,
+        testReminderId,
         calendarEventId,
         calendarSyncEnabled,
       };
@@ -158,6 +190,10 @@ const HomeScreen = () => {
                 await NotificationService.cancelNotification(sample.notificationIds ?? sample.notificationId);
               }
 
+              if (sample?.testReminderId) {
+                await NotificationService.cancelNotification(sample.testReminderId);
+              }
+
               if (sample?.calendarEventId) {
                 await CalendarService.deleteEvent(sample.calendarEventId);
               }
@@ -193,7 +229,17 @@ const HomeScreen = () => {
         await NotificationService.cancelNotification(existing.notificationIds ?? existing.notificationId);
       }
 
+      if (existing.testReminderId) {
+        await NotificationService.cancelNotification(existing.testReminderId);
+      }
+
       const notificationIds = await NotificationService.scheduleCureNotification(
+        updatedSample.id,
+        updatedSample.name,
+        updatedSample.dueDate
+      );
+
+      const testReminderId = await NotificationService.scheduleTestHourReminder(
         updatedSample.id,
         updatedSample.name,
         updatedSample.dueDate
@@ -229,11 +275,17 @@ const HomeScreen = () => {
             return sample;
           }
 
-          const { notificationId: _legacyId, notificationIds: _legacyIds, ...rest } = sample;
+          const {
+            notificationId: _legacyId,
+            notificationIds: _legacyIds,
+            testReminderId: _legacyTestReminderId,
+            ...rest
+          } = sample;
           return {
             ...rest,
             ...updatedSample,
             notificationIds,
+            testReminderId,
             calendarEventId,
             calendarSyncEnabled,
           };
@@ -252,17 +304,30 @@ const HomeScreen = () => {
   }, [samples]);
 
   const handleSaveToGalleryChange = useCallback(async (enabled) => {
-    setSaveToGalleryEnabled(enabled);
-    try {
-      const currentSettings = await StorageService.loadSettings();
-      await StorageService.saveSettings({
-        ...currentSettings,
-        saveToGalleryEnabled: enabled,
-      });
-    } catch (error) {
-      console.error('Galeri tercihi kaydedilemedi:', error);
+    if (enabled) {
+      try {
+        const hasPermission = await MediaService.ensureSaveToGalleryAccess();
+        if (!hasPermission) {
+          Alert.alert(
+            'Galeri İzni',
+            'Fotoğrafı galeride saklamak için gereken izin verilmedi. Ayarlardan izin verdikten sonra tekrar deneyebilirsiniz.'
+          );
+          setSaveToGalleryEnabled(false);
+          await persistSaveToGalleryPreference(false);
+          return;
+        }
+      } catch (error) {
+        console.error('Galeri izin kontrolü başarısız oldu:', error);
+        Alert.alert('Galeri', 'Galeri izni kontrol edilirken bir hata oluştu.');
+        setSaveToGalleryEnabled(false);
+        await persistSaveToGalleryPreference(false);
+        return;
+      }
     }
-  }, []);
+
+    setSaveToGalleryEnabled(enabled);
+    await persistSaveToGalleryPreference(enabled);
+  }, [persistSaveToGalleryPreference]);
 
   const handleCapturePhoto = useCallback(async (targetSample) => {
     try {
@@ -271,6 +336,13 @@ const HomeScreen = () => {
       if (result.cancelled) {
         if (result.reason === 'permission_denied') {
           Alert.alert('Kamera İzni', 'Kamera erişimi olmadan fotoğraf ekleyemezsiniz.');
+        } else if (result.reason === 'media_permission_denied') {
+          Alert.alert(
+            'Galeri İzni',
+            'Fotoğrafı galeride saklamak için galeri erişim izni verilmedi. Ayarlardan izin verene kadar bu özellik kapalı durumda kalacak.'
+          );
+          setSaveToGalleryEnabled(false);
+          await persistSaveToGalleryPreference(false);
         } else if (result.reason === 'camera_unavailable') {
           Alert.alert('Kamera Kullanılamıyor', 'Bu cihazda kamera bulunmuyor veya şu anda erişilemiyor.');
         }
@@ -301,7 +373,7 @@ const HomeScreen = () => {
       console.error('Fotoğraf yakalama hatası:', error);
       Alert.alert('Fotoğraf', 'Fotoğraf eklenemedi. Lütfen tekrar deneyin.');
     }
-  }, [samples, saveToGalleryEnabled]);
+  }, [persistSaveToGalleryPreference, samples, saveToGalleryEnabled]);
 
   const openCreateModal = useCallback(() => {
     setModalMode('create');

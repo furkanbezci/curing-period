@@ -42,6 +42,7 @@ const AddSampleModal = ({
   const originalPhotoUriRef = useRef(null);
   const isEdit = mode === MODES.edit;
 
+  console.log("🗓️🗓️ calendarPermissionsGranted",calendarPermissionsGranted)
   useEffect(() => {
     if (!visible) {
       return;
@@ -95,6 +96,7 @@ const AddSampleModal = ({
       photoUri: finalPhotoUri,
       calendarSyncEnabled,
       calendarEventId: calendarSyncEnabled ? initialSample?.calendarEventId ?? null : null,
+      testReminderId: initialSample?.testReminderId ?? null,
     };
 
     if (calendarSyncEnabled) {
@@ -102,6 +104,8 @@ const AddSampleModal = ({
         draftSample,
         draftSample.calendarEventId
       );
+      console.log("draftSample",draftSample)
+      console.log("dayEvents",dayEvents)
 
       if (dayEvents.length > 0) {
         const previewItems = dayEvents
@@ -329,7 +333,7 @@ const AddSampleModal = ({
                 <View style={styles.calendarInfo}>
                   <Text style={styles.summaryLabel}>Takvime ekle</Text>
                   <Text style={styles.calendarHelpText}>
-                    Takvime ekleyip alarm kur.
+                    Takvime hatırlatıcı ekle.
                   </Text>
                 </View>
                 <Switch
