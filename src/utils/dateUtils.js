@@ -24,7 +24,11 @@ export const differenceInHours = (date1, date2) => {
 };
 
 export const differenceInDays = (date1, date2) => {
-  return Math.floor((date1 - date2) / (1000 * 60 * 60 * 24));
+  const diff = (date1 - date2) / (1000 * 60 * 60 * 24);
+  if (diff >= 0) {
+    return Math.ceil(diff);
+  }
+  return Math.floor(diff);
 };
 
 export const isBefore = (date1, date2) => {
@@ -38,19 +42,25 @@ export const getRemainingTime = (dueDate) => {
   if (isBefore(due, now)) {
     return { text: 'Süre doldu', color: '#DC2626', status: 'overdue' };
   }
-  
-  const diffMinutes = differenceInMinutes(due, now);
-  const diffHours = differenceInHours(due, now);
-  const diffDays = differenceInDays(due, now);
-  
-  if (diffMinutes < 60) {
-    return { text: `${diffMinutes} dakika kaldı`, color: '#D97706', status: 'urgent' };
+
+  const diffHours = Math.max(1, differenceInHours(due, now));
+
+  if (diffHours <= 12) {
+    return { text: 'Bugün kürden çıkacak', color: '#D97706', status: 'urgent' };
   }
-  
-  if (diffHours < 24) {
-    return { text: `${diffHours} saat kaldı`, color: '#D97706', status: 'urgent' };
+
+  const isSameDay = due.toDateString() === now.toDateString();
+
+  if (isSameDay) {
+    return { text: 'Bugün içinde', color: '#D97706', status: 'urgent' };
   }
+
+  const diffDays = Math.max(1, differenceInDays(due, now));
   
+  if (diffDays === 1) {
+    return { text: 'Yarın kürden çıkacak', color: '#059669', status: 'normal' };
+  }
+
   if (diffDays < 7) {
     return { text: `${diffDays} gün kaldı`, color: '#059669', status: 'normal' };
   }

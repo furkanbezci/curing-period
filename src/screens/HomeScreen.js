@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,14 +11,35 @@ import {
 } from 'react-native';
 import SampleCard from '../components/SampleCard';
 import AddSampleModal from '../components/AddSampleModal';
+import SampleListHeader from '../components/SampleListHeader';
+import SampleEmptyState from '../components/SampleEmptyState';
 import { StorageService } from '../services/storageService';
 import { NotificationService } from '../services/notificationService';
+import { MediaService } from '../services/mediaService';
+import { CalendarService } from '../services/calendarService';
 import { COLORS } from '../constants';
+import { getRemainingTime } from '../utils/dateUtils';
 
 const HomeScreen = () => {
   const [samples, setSamples] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
+  const [modalMode, setModalMode] = useState('create');
+  const [editingSample, setEditingSample] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [calendarPermissionGranted, setCalendarPermissionGranted] = useState(false);
+  const [saveToGalleryEnabled, setSaveToGalleryEnabled] = useState(true);
+
+  const persistSaveToGalleryPreference = useCallback(async (enabled) => {
+    try {
+      const currentSettings = await StorageService.loadSettings();
+      await StorageService.saveSettings({
+        ...currentSettings,
+        saveToGalleryEnabled: enabled,
+      });
+    } catch (error) {
+      console.error('Galeri tercihi kaydedilemedi:', error);
+    }
+  }, []);
 
   useEffect(() => {
     initializeApp();
@@ -37,6 +58,36 @@ const HomeScreen = () => {
       }
 
       await loadSamples();
+
+      const storedSettings = (await StorageService.loadSettings()) || {};
+      let initialSavePreference = typeof storedSettings.saveToGalleryEnabled === 'boolean'
+        ? storedSettings.saveToGalleryEnabled
+        : true;
+
+      if (initialSavePreference) {
+        try {
+          const galleryStatus = await MediaService.getSaveToGalleryAccessStatus();
+          if (!galleryStatus.granted) {
+            initialSavePreference = false;
+            await StorageService.saveSettings({
+              ...storedSettings,
+              saveToGalleryEnabled: false,
+            });
+          }
+        } catch (error) {
+          console.error('Galeri izin durumu kontrol edilemedi:', error);
+          initialSavePreference = false;
+        }
+      }
+
+      setSaveToGalleryEnabled(initialSavePreference);
+
+      const calendarGranted = await CalendarService.requestPermissions();
+      console.log("√calendarGranted",calendarGranted)
+      setCalendarPermissionGranted(calendarGranted);
+      if (!calendarGranted) {
+        console.warn('Takvim izni verilmedi.');
+      }
     } catch (error) {
       console.error('Uygulama başlatma hatası:', error);
       Alert.alert('Hata', 'Uygulama başlatılamadı.');
@@ -54,46 +105,76 @@ const HomeScreen = () => {
     }
   };
 
-  const handleAddSample = async (sample) => {
+  const handleAddSample = useCallback(async (sample) => {
     try {
-      const notificationId = await NotificationService.scheduleCureNotification(
+      const notificationIds = await NotificationService.scheduleCureNotification(
         sample.id,
         sample.name,
         sample.dueDate
       );
 
+      const testReminderId = await NotificationService.scheduleTestHourReminder(
+        sample.id,
+        sample.name,
+        sample.dueDate
+      );
+
+      let calendarEventId = sample.calendarEventId ?? null;
+      let calendarSyncEnabled = Boolean(sample.calendarSyncEnabled);
+
+      if (calendarSyncEnabled) {
+        calendarEventId = await CalendarService.createEvent(sample);
+        if (!calendarEventId) {
+          calendarSyncEnabled = false;
+          Alert.alert(
+            'Takvim Uyarısı',
+            'Takvim etkinliği oluşturulamadı. İsterseniz daha sonra tekrar deneyebilirsiniz.'
+          );
+        }
+      }
+
       const sampleWithNotification = {
         ...sample,
-        notificationId,
+        notificationIds,
+        testReminderId,
+        calendarEventId,
+        calendarSyncEnabled,
       };
 
-      const updatedSamples = [sampleWithNotification, ...samples];
-      setSamples(updatedSamples);
+      let updatedSamples = [];
+      setSamples((prev) => {
+        updatedSamples = [sampleWithNotification, ...prev];
+        return updatedSamples;
+      });
       await StorageService.saveSamples(updatedSamples);
 
       Alert.alert('Başarılı', 'Numune başarıyla eklendi ve bildirim planlandı.');
+      return true;
     } catch (error) {
       console.error('Numune ekleme hatası:', error);
       Alert.alert('Hata', 'Numune eklenirken bir hata oluştu.');
+      return false;
     }
-  };
+  }, []);
 
-  const handleToggleComplete = async (sampleId) => {
+  const handleToggleComplete = useCallback(async (sampleId) => {
     try {
-      const updatedSamples = samples.map(sample =>
-        sample.id === sampleId
+      let updatedSamples = [];
+      setSamples((prev) => {
+        updatedSamples = prev.map(sample =>
+          sample.id === sampleId
           ? { ...sample, completed: !sample.completed }
           : sample
-      );
-
-      setSamples(updatedSamples);
+        );
+        return updatedSamples;
+      });
       await StorageService.saveSamples(updatedSamples);
     } catch (error) {
       console.error('Durum güncelleme hatası:', error);
     }
-  };
+  }, []);
 
-  const handleDeleteSample = async (sampleId) => {
+  const handleDeleteSample = useCallback((sampleId) => {
     Alert.alert(
       'Numune Sil',
       'Bu numuneyi silmek istediğinizden emin misiniz?',
@@ -105,12 +186,27 @@ const HomeScreen = () => {
           onPress: async () => {
             try {
               const sample = samples.find(s => s.id === sampleId);
-              if (sample?.notificationId) {
-                await NotificationService.cancelNotification(sample.notificationId);
+              if (sample?.notificationIds || sample?.notificationId) {
+                await NotificationService.cancelNotification(sample.notificationIds ?? sample.notificationId);
               }
 
-              const updatedSamples = samples.filter(s => s.id !== sampleId);
-              setSamples(updatedSamples);
+              if (sample?.testReminderId) {
+                await NotificationService.cancelNotification(sample.testReminderId);
+              }
+
+              if (sample?.calendarEventId) {
+                await CalendarService.deleteEvent(sample.calendarEventId);
+              }
+
+              if (sample?.photoUri) {
+                await MediaService.deletePhoto(sample.photoUri);
+              }
+
+              let updatedSamples = [];
+              setSamples((prev) => {
+                updatedSamples = prev.filter(s => s.id !== sampleId);
+                return updatedSamples;
+              });
               await StorageService.saveSamples(updatedSamples);
             } catch (error) {
               console.error('Numune silme hatası:', error);
@@ -120,9 +216,178 @@ const HomeScreen = () => {
         },
       ]
     );
-  };
+  }, [samples]);
 
-  const getStats = () => {
+  const handleUpdateSample = useCallback(async (updatedSample) => {
+    try {
+      const existing = samples.find(s => s.id === updatedSample.id);
+      if (!existing) {
+        return false;
+      }
+
+      if (existing.notificationIds || existing.notificationId) {
+        await NotificationService.cancelNotification(existing.notificationIds ?? existing.notificationId);
+      }
+
+      if (existing.testReminderId) {
+        await NotificationService.cancelNotification(existing.testReminderId);
+      }
+
+      const notificationIds = await NotificationService.scheduleCureNotification(
+        updatedSample.id,
+        updatedSample.name,
+        updatedSample.dueDate
+      );
+
+      const testReminderId = await NotificationService.scheduleTestHourReminder(
+        updatedSample.id,
+        updatedSample.name,
+        updatedSample.dueDate
+      );
+
+      let calendarEventId = existing.calendarEventId ?? null;
+      let calendarSyncEnabled = Boolean(updatedSample.calendarSyncEnabled);
+
+      if (calendarSyncEnabled) {
+        const updatedId = await CalendarService.updateEvent(calendarEventId, updatedSample);
+        if (updatedId) {
+          calendarEventId = updatedId;
+        } else {
+          calendarEventId = await CalendarService.createEvent(updatedSample);
+        }
+
+        if (!calendarEventId) {
+          calendarSyncEnabled = false;
+          Alert.alert(
+            'Takvim Uyarısı',
+            'Takvim güncellenemedi. Etkinlik bağlantısı kapatıldı.'
+          );
+        }
+      } else if (calendarEventId) {
+        await CalendarService.deleteEvent(calendarEventId);
+        calendarEventId = null;
+      }
+
+      let nextSamples = [];
+      setSamples((prev) => {
+        nextSamples = prev.map(sample => {
+          if (sample.id !== updatedSample.id) {
+            return sample;
+          }
+
+          const {
+            notificationId: _legacyId,
+            notificationIds: _legacyIds,
+            testReminderId: _legacyTestReminderId,
+            ...rest
+          } = sample;
+          return {
+            ...rest,
+            ...updatedSample,
+            notificationIds,
+            testReminderId,
+            calendarEventId,
+            calendarSyncEnabled,
+          };
+        });
+        return nextSamples;
+      });
+
+      await StorageService.saveSamples(nextSamples);
+      Alert.alert('Güncellendi', 'Numune bilgileri güncellendi.');
+      return true;
+    } catch (error) {
+      console.error('Numune güncelleme hatası:', error);
+      Alert.alert('Hata', 'Numune güncellenirken bir hata oluştu.');
+      return false;
+    }
+  }, [samples]);
+
+  const handleSaveToGalleryChange = useCallback(async (enabled) => {
+    if (enabled) {
+      try {
+        const hasPermission = await MediaService.ensureSaveToGalleryAccess();
+        if (!hasPermission) {
+          Alert.alert(
+            'Galeri İzni',
+            'Fotoğrafı galeride saklamak için gereken izin verilmedi. Ayarlardan izin verdikten sonra tekrar deneyebilirsiniz.'
+          );
+          setSaveToGalleryEnabled(false);
+          await persistSaveToGalleryPreference(false);
+          return;
+        }
+      } catch (error) {
+        console.error('Galeri izin kontrolü başarısız oldu:', error);
+        Alert.alert('Galeri', 'Galeri izni kontrol edilirken bir hata oluştu.');
+        setSaveToGalleryEnabled(false);
+        await persistSaveToGalleryPreference(false);
+        return;
+      }
+    }
+
+    setSaveToGalleryEnabled(enabled);
+    await persistSaveToGalleryPreference(enabled);
+  }, [persistSaveToGalleryPreference]);
+
+  const handleCapturePhoto = useCallback(async (targetSample) => {
+    try {
+      const result = await MediaService.capturePhoto({ saveToGallery: saveToGalleryEnabled });
+
+      if (result.cancelled) {
+        if (result.reason === 'permission_denied') {
+          Alert.alert('Kamera İzni', 'Kamera erişimi olmadan fotoğraf ekleyemezsiniz.');
+        } else if (result.reason === 'media_permission_denied') {
+          Alert.alert(
+            'Galeri İzni',
+            'Fotoğrafı galeride saklamak için galeri erişim izni verilmedi. Ayarlardan izin verene kadar bu özellik kapalı durumda kalacak.'
+          );
+          setSaveToGalleryEnabled(false);
+          await persistSaveToGalleryPreference(false);
+        } else if (result.reason === 'camera_unavailable') {
+          Alert.alert('Kamera Kullanılamıyor', 'Bu cihazda kamera bulunmuyor veya şu anda erişilemiyor.');
+        }
+        return;
+      }
+
+      const currentSample = samples.find(s => s.id === targetSample.id);
+      if (!currentSample) {
+        return;
+      }
+
+      const updatedSample = { ...currentSample, photoUri: result.uri };
+
+      let nextSamples = [];
+      setSamples(prev => {
+        nextSamples = prev.map(sample => (sample.id === updatedSample.id ? updatedSample : sample));
+        return nextSamples;
+      });
+
+      await StorageService.saveSamples(nextSamples);
+
+      if (currentSample.photoUri && currentSample.photoUri !== result.uri) {
+        await MediaService.deletePhoto(currentSample.photoUri);
+      }
+
+      Alert.alert('Fotoğraf', 'Fotoğraf eklendi.');
+    } catch (error) {
+      console.error('Fotoğraf yakalama hatası:', error);
+      Alert.alert('Fotoğraf', 'Fotoğraf eklenemedi. Lütfen tekrar deneyin.');
+    }
+  }, [persistSaveToGalleryPreference, samples, saveToGalleryEnabled]);
+
+  const openCreateModal = useCallback(() => {
+    setModalMode('create');
+    setEditingSample(null);
+    setModalVisible(true);
+  }, []);
+
+  const openEditModal = useCallback((sample) => {
+    setModalMode('edit');
+    setEditingSample(sample);
+    setModalVisible(true);
+  }, []);
+
+  const stats = useMemo(() => {
     const total = samples.length;
     const completed = samples.filter(s => s.completed).length;
     const active = total - completed;
@@ -133,9 +398,46 @@ const HomeScreen = () => {
     }).length;
 
     return { total, completed, active, overdue };
-  };
+  }, [samples]);
 
-  const stats = getStats();
+  const upcomingSample = useMemo(() => {
+    const openSamples = samples
+      .filter(sample => !sample.completed)
+      .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+    return openSamples[0] ?? null;
+  }, [samples]);
+
+  const upcomingStatus = useMemo(() => {
+    if (!upcomingSample) {
+      return null;
+    }
+    return getRemainingTime(upcomingSample.dueDate);
+  }, [upcomingSample]);
+
+  const renderSample = useCallback(({ item }) => (
+    <SampleCard
+      sample={item}
+      onToggleComplete={handleToggleComplete}
+      onDelete={handleDeleteSample}
+      onEdit={openEditModal}
+      onCapturePhoto={handleCapturePhoto}
+    />
+  ), [handleCapturePhoto, handleDeleteSample, handleToggleComplete, openEditModal]);
+
+  const keyExtractor = useCallback((item) => item.id, []);
+
+  const renderHeader = useMemo(
+    () => () => (
+      <SampleListHeader
+        stats={stats}
+        upcomingSample={upcomingSample}
+        upcomingStatus={upcomingStatus}
+      />
+    ),
+    [stats, upcomingSample, upcomingStatus]
+  );
+
+  const renderEmptyState = useCallback(() => <SampleEmptyState />, []);
 
   if (loading) {
     return (
@@ -149,72 +451,44 @@ const HomeScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
-      
-      <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <Text style={styles.title}>🏗️ Beton Kür Takip</Text>
-          <Text style={styles.subtitle}>İnşaat Mühendisliği Kür Takip Sistemi</Text>
-        </View>
-        
-        <View style={styles.statsContainer}>
-          <View style={styles.statItem}>
-            <Text style={styles.statNumber}>{stats.total}</Text>
-            <Text style={styles.statLabel}>Toplam</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Text style={[styles.statNumber, { color: COLORS.success }]}>{stats.active}</Text>
-            <Text style={styles.statLabel}>Aktif</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Text style={[styles.statNumber, { color: COLORS.warning }]}>{stats.overdue}</Text>
-            <Text style={styles.statLabel}>Süre Doldu</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Text style={[styles.statNumber, { color: COLORS.primary }]}>{stats.completed}</Text>
-            <Text style={styles.statLabel}>Tamamlandı</Text>
-          </View>
-        </View>
-      </View>
+      <StatusBar barStyle="dark-content" backgroundColor={COLORS.gray[50]} />
 
-      <View style={styles.content}>
-        {samples.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyStateIcon}>📋</Text>
-            <Text style={styles.emptyStateTitle}>Henüz numune yok</Text>
-            <Text style={styles.emptyStateText}>
-              Sağ alttaki + butonuna basarak{'\n'}ilk numunenizi ekleyin
-            </Text>
-          </View>
-        ) : (
-          <FlatList
-            data={samples}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <SampleCard
-                sample={item}
-                onToggleComplete={handleToggleComplete}
-                onDelete={handleDeleteSample}
-              />
-            )}
-            contentContainerStyle={styles.listContainer}
-            showsVerticalScrollIndicator={false}
-          />
-        )}
-      </View>
+      <FlatList
+        data={samples}
+        keyExtractor={keyExtractor}
+        renderItem={renderSample}
+        ListHeaderComponent={renderHeader}
+        ListEmptyComponent={renderEmptyState}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+      />
 
       <TouchableOpacity
         style={styles.addButton}
-        onPress={() => setModalVisible(true)}
+        onPress={openCreateModal}
+        activeOpacity={0.85}
       >
         <Text style={styles.addButtonText}>+</Text>
       </TouchableOpacity>
 
-      <AddSampleModal
-        visible={modalVisible}
-        onClose={() => setModalVisible(false)}
-        onSave={handleAddSample}
-      />
+      {modalVisible && (
+        <AddSampleModal
+          visible={modalVisible}
+          onClose={() => {
+            setModalVisible(false);
+            setModalMode('create');
+            setEditingSample(null);
+          }}
+          onSave={handleAddSample}
+          onUpdate={handleUpdateSample}
+          mode={modalMode}
+          initialSample={editingSample}
+          calendarPermissionsGranted={calendarPermissionGranted}
+          onCalendarPermissionChange={setCalendarPermissionGranted}
+          saveToGalleryEnabled={saveToGalleryEnabled}
+          onSaveToGalleryChange={handleSaveToGalleryChange}
+        />
+      )}
     </SafeAreaView>
   );
 };
@@ -233,82 +507,17 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: COLORS.gray[600],
   },
-  header: {
-    backgroundColor: COLORS.white,
+  listContent: {
     paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.gray[200],
-  },
-  headerContent: {
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: COLORS.dark,
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: COLORS.gray[600],
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  statItem: {
-    alignItems: 'center',
-  },
-  statNumber: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: COLORS.dark,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: COLORS.gray[600],
-    marginTop: 2,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 16,
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 40,
-  },
-  emptyStateIcon: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-  emptyStateTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: COLORS.dark,
-    marginBottom: 8,
-  },
-  emptyStateText: {
-    fontSize: 16,
-    color: COLORS.gray[600],
-    textAlign: 'center',
-    lineHeight: 24,
-  },
-  listContainer: {
-    paddingTop: 16,
-    paddingBottom: 100,
+    paddingBottom: 120,
   },
   addButton: {
     position: 'absolute',
     right: 20,
     bottom: 30,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
@@ -319,7 +528,7 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   addButtonText: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: '700',
     color: COLORS.white,
   },

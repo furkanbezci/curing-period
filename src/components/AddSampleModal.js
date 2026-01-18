@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,15 +7,67 @@ import {
   Modal,
   StyleSheet,
   Alert,
+  ScrollView,
+  Switch,
 } from 'react-native';
 import { formatDate, calculateDueDate } from '../utils/dateUtils';
 import { COLORS, CURE_PERIODS } from '../constants';
+import DatePickerField from './DatePickerField';
+import PhotoAttachmentField from './PhotoAttachmentField';
+import { MediaService } from '../services/mediaService';
+import { CalendarService } from '../services/calendarService';
 
-const AddSampleModal = ({ visible, onClose, onSave }) => {
+const MODES = {
+  create: 'create',
+  edit: 'edit',
+};
+
+const AddSampleModal = ({
+  visible,
+  onClose,
+  onSave,
+  onUpdate,
+  mode = MODES.create,
+  initialSample = null,
+  calendarPermissionsGranted = false,
+  onCalendarPermissionChange,
+  saveToGalleryEnabled = true,
+  onSaveToGalleryChange,
+}) => {
   const [sampleName, setSampleName] = useState('');
   const [cureDays, setCureDays] = useState(28);
+  const [startDate, setStartDate] = useState(new Date());
+  const [photo, setPhoto] = useState(null);
+  const [calendarSyncEnabled, setCalendarSyncEnabled] = useState(calendarPermissionsGranted);
+  const originalPhotoUriRef = useRef(null);
+  const isEdit = mode === MODES.edit;
 
-  const handleSave = () => {
+  console.log("🗓️🗓️ calendarPermissionsGranted",calendarPermissionsGranted)
+  useEffect(() => {
+    if (!visible) {
+      return;
+    }
+
+    if (isEdit && initialSample) {
+      setSampleName(initialSample.name ?? '');
+      setCureDays(initialSample.cureDays ?? 28);
+      setStartDate(initialSample.cureDate ? new Date(initialSample.cureDate) : new Date());
+      setPhoto(initialSample.photoUri ? { uri: initialSample.photoUri, size: null, isNew: false } : null);
+      setCalendarSyncEnabled(Boolean(initialSample.calendarSyncEnabled ?? initialSample.calendarEventId));
+      originalPhotoUriRef.current = initialSample.photoUri ?? null;
+    } else {
+      resetForm();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, isEdit, initialSample]);
+
+  useEffect(() => {
+    if (!isEdit && visible) {
+      setCalendarSyncEnabled(calendarPermissionsGranted);
+    }
+  }, [calendarPermissionsGranted, isEdit, visible]);
+
+  const handleSave = async () => {
     if (!sampleName.trim()) {
       Alert.alert('Hata', 'Numune adı giriniz.');
       return;
@@ -26,30 +78,155 @@ const AddSampleModal = ({ visible, onClose, onSave }) => {
       return;
     }
 
-    const now = new Date();
-    const sample = {
-      id: Date.now().toString(),
+    const selectedStartDate = startDate instanceof Date ? startDate : new Date(startDate);
+    const dueDate = calculateDueDate(selectedStartDate, cureDays);
+    const createdAt = isEdit && initialSample?.createdAt
+      ? new Date(initialSample.createdAt)
+      : new Date();
+    const finalPhotoUri = photo?.uri ?? null;
+
+    const draftSample = {
+      id: initialSample?.id ?? Date.now().toString(),
       name: sampleName.trim(),
-      cureDate: now.toISOString(),
+      cureDate: selectedStartDate.toISOString(),
       cureDays,
-      dueDate: calculateDueDate(now, cureDays).toISOString(),
-      completed: false,
-      createdAt: now.toISOString(),
+      dueDate: dueDate.toISOString(),
+      completed: initialSample?.completed ?? false,
+      createdAt: createdAt.toISOString(),
+      photoUri: finalPhotoUri,
+      calendarSyncEnabled,
+      calendarEventId: calendarSyncEnabled ? initialSample?.calendarEventId ?? null : null,
+      testReminderId: initialSample?.testReminderId ?? null,
     };
 
-    onSave(sample);
-    resetForm();
+    if (calendarSyncEnabled) {
+      const dayEvents = await CalendarService.getEventsForDay(
+        draftSample,
+        draftSample.calendarEventId
+      );
+      console.log("draftSample",draftSample)
+      console.log("dayEvents",dayEvents)
+
+      if (dayEvents.length > 0) {
+        const previewItems = dayEvents
+          .slice(0, 3)
+          .map(event => {
+            const title = event.title || 'Etkinlik';
+            const timeLabel = event.allDay
+              ? 'Tüm gün'
+              : (() => {
+                  const startTime = new Date(event.startDate);
+                  const endTime = new Date(event.endDate);
+                  const startText = startTime.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+                  const endText = endTime.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+                  return `${startText} - ${endText}`;
+                })();
+            return `• ${title} (${timeLabel})`;
+          })
+          .join('\n');
+
+        const extraCount = Math.max(0, dayEvents.length - 3);
+        const preview = extraCount > 0
+          ? `${previewItems}\n• +${extraCount} etkinlik daha`
+          : previewItems;
+
+        const proceed = await new Promise(resolve => {
+          Alert.alert(
+            'Takvim Uyarısı',
+            `Kür bitiş günü takvimde başka etkinlik(ler) var:\n\n${preview}\n\nYine de devam etmek ister misiniz?`,
+            [
+              {
+                text: 'İptal',
+                style: 'cancel',
+                onPress: () => resolve(false),
+              },
+              {
+                text: 'Devam',
+                onPress: () => resolve(true),
+              },
+            ],
+            { cancelable: false }
+          );
+        });
+
+        if (!proceed) {
+          return;
+        }
+      }
+    }
+
+    const sample = draftSample;
+
+    try {
+      let result = true;
+      if (isEdit && onUpdate) {
+        result = await onUpdate(sample);
+      } else {
+        result = await onSave(sample);
+      }
+      if (result === false) {
+        return;
+      }
+
+      if (originalPhotoUriRef.current && originalPhotoUriRef.current !== finalPhotoUri) {
+        await MediaService.deletePhoto(originalPhotoUriRef.current);
+      }
+
+      originalPhotoUriRef.current = finalPhotoUri;
+      handleClose();
+    } catch (error) {
+      console.error('Numune kaydedilemedi:', error);
+    }
   };
 
   const resetForm = () => {
     setSampleName('');
     setCureDays(28);
+    setStartDate(new Date());
+    setPhoto(null);
+    setCalendarSyncEnabled(calendarPermissionsGranted);
+    originalPhotoUriRef.current = null;
   };
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
+    if (photo?.isNew && photo?.uri && photo?.uri !== originalPhotoUriRef.current) {
+      MediaService.deletePhoto(photo.uri).catch(() => {});
+    }
+
     resetForm();
     onClose();
-  };
+  }, [onClose, photo]);
+
+  const handlePhotoChange = useCallback((nextPhoto) => {
+    if (nextPhoto) {
+      if (photo?.isNew && photo.uri && photo.uri !== nextPhoto.uri) {
+        MediaService.deletePhoto(photo.uri).catch(() => {});
+      }
+      setPhoto({ ...nextPhoto, isNew: true });
+      return;
+    }
+
+    if (photo?.isNew && photo.uri) {
+      MediaService.deletePhoto(photo.uri).catch(() => {});
+    }
+
+    setPhoto(null);
+  }, [photo]);
+
+  const handleCalendarToggle = useCallback(async (nextValue) => {
+    if (nextValue) {
+      const granted = await CalendarService.ensurePermissionOrOpenSettings();
+      if (!granted) {
+        setCalendarSyncEnabled(false);
+        onCalendarPermissionChange?.(false);
+        return;
+      }
+
+      onCalendarPermissionChange?.(true);
+    }
+
+    setCalendarSyncEnabled(nextValue);
+  }, [onCalendarPermissionChange]);
 
   return (
     <Modal
@@ -61,13 +238,17 @@ const AddSampleModal = ({ visible, onClose, onSave }) => {
       <View style={styles.overlay}>
         <View style={styles.modal}>
           <View style={styles.header}>
-            <Text style={styles.title}>Yeni Numune Ekle</Text>
+            <Text style={styles.title}>{isEdit ? 'Numuneyi Düzenle' : 'Yeni Numune Ekle'}</Text>
             <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
               <Text style={styles.closeButtonText}>✕</Text>
             </TouchableOpacity>
           </View>
 
-          <View style={styles.content}>
+          <ScrollView
+            style={styles.content}
+            contentContainerStyle={styles.contentContainer}
+            showsVerticalScrollIndicator={false}
+          >
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Numune Adı</Text>
               <TextInput
@@ -76,21 +257,29 @@ const AddSampleModal = ({ visible, onClose, onSave }) => {
                 onChangeText={setSampleName}
                 placeholder="Örn: C30/37 - Şantiye A - Numune 1"
                 placeholderTextColor={COLORS.gray[400]}
-                autoFocus
+                autoFocus={!isEdit}
               />
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Kür Başlangıç Tarihi</Text>
-              <View style={styles.dateInfo}>
-                <Text style={styles.dateInfoText}>
-                  📅 Şimdi: {formatDate(new Date())}
-                </Text>
-                <Text style={styles.dateInfoSubtext}>
-                  Numune şu anki tarihle başlayacak
-                </Text>
-              </View>
+              <DatePickerField
+                label="Kür Başlangıç Tarihi"
+                value={startDate}
+                onChange={setStartDate}
+                mode="datetime"
+                placeholder="Başlangıç tarihi seçin"
+              />
+              <Text style={styles.dateInfoSubtext}>
+                Seçtiğiniz tarih numunenin kür başlangıcı olarak kaydedilecek
+              </Text>
             </View>
+
+            <PhotoAttachmentField
+              value={photo}
+              onChange={handlePhotoChange}
+              saveToGalleryEnabled={saveToGalleryEnabled}
+              onSaveToGalleryEnabledChange={onSaveToGalleryChange}
+            />
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Kür Süresi</Text>
@@ -130,14 +319,32 @@ const AddSampleModal = ({ visible, onClose, onSave }) => {
               <Text style={styles.summaryTitle}>📋 Özet</Text>
               <Text style={styles.summaryText}>
                 <Text style={styles.summaryLabel}>Başlangıç: </Text>
-                {formatDate(new Date())}
+                {formatDate(startDate)}
               </Text>
               <Text style={styles.summaryText}>
                 <Text style={styles.summaryLabel}>Bitiş Tarihi: </Text>
-                {formatDate(calculateDueDate(new Date(), cureDays))}
+                {formatDate(calculateDueDate(startDate, cureDays))}
               </Text>
+              <Text style={styles.summaryText}>
+                <Text style={styles.summaryLabel}>Fotoğraf: </Text>
+                {photo?.uri ? 'Eklendi' : 'Yok'}
+              </Text>
+              <View style={styles.calendarRow}>
+                <View style={styles.calendarInfo}>
+                  <Text style={styles.summaryLabel}>Takvime ekle</Text>
+                  <Text style={styles.calendarHelpText}>
+                    Takvime hatırlatıcı ekle.
+                  </Text>
+                </View>
+                <Switch
+                  value={calendarSyncEnabled}
+                  onValueChange={handleCalendarToggle}
+                  trackColor={{ false: COLORS.gray[300], true: COLORS.primary }}
+                  thumbColor={calendarSyncEnabled ? COLORS.white : COLORS.white}
+                />
+              </View>
             </View>
-          </View>
+          </ScrollView>
 
           <View style={styles.footer}>
             <TouchableOpacity
@@ -150,7 +357,7 @@ const AddSampleModal = ({ visible, onClose, onSave }) => {
               style={[styles.button, styles.saveButton]}
               onPress={handleSave}
             >
-              <Text style={styles.saveButtonText}>Kaydet</Text>
+              <Text style={styles.saveButtonText}>{isEdit ? 'Güncelle' : 'Kaydet'}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -198,7 +405,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   content: {
+    maxHeight: '75%',
+  },
+  contentContainer: {
     padding: 20,
+    paddingBottom: 32,
   },
   inputGroup: {
     marginBottom: 20,
@@ -217,18 +428,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: COLORS.dark,
     backgroundColor: COLORS.white,
-  },
-  dateInfo: {
-    backgroundColor: COLORS.gray[50],
-    borderRadius: 8,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: COLORS.gray[200],
-  },
-  dateInfoText: {
-    fontSize: 16,
-    color: COLORS.dark,
-    fontWeight: '500',
   },
   dateInfoSubtext: {
     fontSize: 14,
@@ -281,6 +480,24 @@ const styles = StyleSheet.create({
   summaryLabel: {
     fontWeight: '500',
     color: COLORS.gray[600],
+  },
+  calendarRow: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.gray[200],
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  calendarInfo: {
+    flex: 1,
+    marginRight: 12,
+  },
+  calendarHelpText: {
+    fontSize: 12,
+    color: COLORS.gray[500],
+    marginTop: 2,
   },
   footer: {
     flexDirection: 'row',
