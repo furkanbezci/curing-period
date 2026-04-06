@@ -1,6 +1,6 @@
 import React from 'react';
-import HomeScreen from './src/screens/HomeScreen';
+import AppRoot from './src/AppRoot';
 
 export default function App() {
-  return <HomeScreen />;
+  return <AppRoot />;
 }

@@ -5,10 +5,10 @@ import {
   FlatList,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
   StatusBar,
   Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import SampleCard from '../components/SampleCard';
 import AddSampleModal from '../components/AddSampleModal';
 import SampleListHeader from '../components/SampleListHeader';
