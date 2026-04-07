@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   StyleSheet,
   StatusBar,
   Alert,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import SampleCard from '../components/SampleCard';
@@ -19,15 +20,27 @@ import { MediaService } from '../services/mediaService';
 import { CalendarService } from '../services/calendarService';
 import { COLORS } from '../constants';
 import { getRemainingTime } from '../utils/dateUtils';
+import { useAppInitialization } from '../hooks/useAppInitialization';
+
+const openAppSettingsAlertButtons = [
+  { text: 'Ayarlara Git', onPress: () => Linking.openSettings() },
+  { text: 'Tamam', style: 'cancel' },
+];
 
 const HomeScreen = () => {
-  const [samples, setSamples] = useState([]);
+  const {
+    loading,
+    samples,
+    setSamples,
+    saveToGalleryEnabled,
+    setSaveToGalleryEnabled,
+    calendarPermissionGranted,
+    setCalendarPermissionGranted,
+  } = useAppInitialization();
+
   const [modalVisible, setModalVisible] = useState(false);
   const [modalMode, setModalMode] = useState('create');
   const [editingSample, setEditingSample] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [calendarPermissionGranted, setCalendarPermissionGranted] = useState(false);
-  const [saveToGalleryEnabled, setSaveToGalleryEnabled] = useState(true);
 
   const persistSaveToGalleryPreference = useCallback(async (enabled) => {
     try {
@@ -40,70 +53,6 @@ const HomeScreen = () => {
       console.error('Galeri tercihi kaydedilemedi:', error);
     }
   }, []);
-
-  useEffect(() => {
-    initializeApp();
-  }, []);
-
-  const initializeApp = async () => {
-    try {
-      await NotificationService.initialize();
-      const hasPermission = await NotificationService.requestPermissions();
-      
-      if (!hasPermission) {
-        Alert.alert(
-          'Bildirim İzni',
-          'Bildirimler için izin verilmedi. Uygulama tam işlevsel olmayabilir.'
-        );
-      }
-
-      await loadSamples();
-
-      const storedSettings = (await StorageService.loadSettings()) || {};
-      let initialSavePreference = typeof storedSettings.saveToGalleryEnabled === 'boolean'
-        ? storedSettings.saveToGalleryEnabled
-        : true;
-
-      if (initialSavePreference) {
-        try {
-          const galleryStatus = await MediaService.getSaveToGalleryAccessStatus();
-          if (!galleryStatus.granted) {
-            initialSavePreference = false;
-            await StorageService.saveSettings({
-              ...storedSettings,
-              saveToGalleryEnabled: false,
-            });
-          }
-        } catch (error) {
-          console.error('Galeri izin durumu kontrol edilemedi:', error);
-          initialSavePreference = false;
-        }
-      }
-
-      setSaveToGalleryEnabled(initialSavePreference);
-
-      const calendarGranted = await CalendarService.requestPermissions();
-      console.log("√calendarGranted",calendarGranted)
-      setCalendarPermissionGranted(calendarGranted);
-      if (!calendarGranted) {
-        console.warn('Takvim izni verilmedi.');
-      }
-    } catch (error) {
-      console.error('Uygulama başlatma hatası:', error);
-      Alert.alert('Hata', 'Uygulama başlatılamadı.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadSamples = async () => {
-    try {
-      const loadedSamples = await StorageService.loadSamples();
-      setSamples(loadedSamples);
-    } catch (error) {
-      console.error('Numuneler yüklenemedi:', error);
-    }
-  };
 
   const handleAddSample = useCallback(async (sample) => {
     try {
@@ -310,7 +259,8 @@ const HomeScreen = () => {
         if (!hasPermission) {
           Alert.alert(
             'Galeri İzni',
-            'Fotoğrafı galeride saklamak için gereken izin verilmedi. Ayarlardan izin verdikten sonra tekrar deneyebilirsiniz.'
+            'Fotoğrafı galeride saklamak için fotoğraflara erişim gerekir. Daha önce reddettiyseniz iOS tekrar soru sormaz; izni Ayarlar üzerinden açmanız gerekir.',
+            openAppSettingsAlertButtons
           );
           setSaveToGalleryEnabled(false);
           await persistSaveToGalleryPreference(false);
@@ -339,7 +289,8 @@ const HomeScreen = () => {
         } else if (result.reason === 'media_permission_denied') {
           Alert.alert(
             'Galeri İzni',
-            'Fotoğrafı galeride saklamak için galeri erişim izni verilmedi. Ayarlardan izin verene kadar bu özellik kapalı durumda kalacak.'
+            'Galeriye kayıt için izin verilmedi veya daha önce reddedildi. İzni Ayarlar > Uygulama > Fotoğraflar üzerinden açabilirsiniz.',
+            openAppSettingsAlertButtons
           );
           setSaveToGalleryEnabled(false);
           await persistSaveToGalleryPreference(false);

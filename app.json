@@ -31,6 +31,22 @@
       "eas": {
         "projectId": "8f464f19-f8cb-4ec4-b1be-4186a9d43b3b"
       }
-    }
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Numune fotoğrafları çekmek için kamera erişimi gerekir.",
+          "photosPermission": "Galeriden fotoğraf seçmek için fotoğraflarınıza erişim gerekir."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Fotoğraflarınızı kullanmak için galeri erişimi gerekir.",
+          "savePhotosPermission": "Çekilen fotoğrafları galerinize kaydetmek için izin gerekir."
+        }
+      ]
+    ]
   }
 }
