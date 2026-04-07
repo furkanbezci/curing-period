@@ -185,6 +185,23 @@ async function processAsset(asset) {
 }
 
 export class MediaService {
+  static async getSaveToGalleryAccessStatus() {
+    if (!MediaLibrary || typeof MediaLibrary.getPermissionsAsync !== 'function') {
+      return { granted: false };
+    }
+    try {
+      const current = await MediaLibrary.getPermissionsAsync();
+      return { granted: hasMediaLibraryAccess(current) };
+    } catch (error) {
+      console.error('Galeri izin durumu okunamadı:', error);
+      return { granted: false };
+    }
+  }
+
+  static async ensureSaveToGalleryAccess() {
+    return ensureMediaLibraryAccess();
+  }
+
   static async ensureCameraPermission() {
     const response = await ImagePicker.requestCameraPermissionsAsync();
     return response?.granted ?? false;
@@ -204,7 +221,10 @@ export class MediaService {
     }
 
     if (saveToGallery) {
-      await ensureMediaLibraryAccess();
+      const galleryOk = await ensureMediaLibraryAccess();
+      if (!galleryOk) {
+        return { cancelled: true, reason: 'media_permission_denied' };
+      }
     }
 
     let result;
