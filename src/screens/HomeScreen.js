@@ -19,13 +19,14 @@ import { MediaService } from '../services/mediaService';
 import { CalendarService } from '../services/calendarService';
 import { COLORS } from '../constants';
 import { getRemainingTime } from '../utils/dateUtils';
+import * as Calendar from 'expo-calendar';
 
 const HomeScreen = () => {
   const [samples, setSamples] = useState([]);
-  const [modalVisible, setModalVisible] = useState(false);
+  const [modalVisible, setModalVisible] = useState(true);
   const [modalMode, setModalMode] = useState('create');
   const [editingSample, setEditingSample] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [calendarPermissionGranted, setCalendarPermissionGranted] = useState(false);
   const [saveToGalleryEnabled, setSaveToGalleryEnabled] = useState(true);
 
@@ -44,6 +45,64 @@ const HomeScreen = () => {
   useEffect(() => {
     initializeApp();
   }, []);
+useEffect(() => {
+  getEventsOnSpecificDate();
+}, []);
+
+
+
+  async function getEventsOnSpecificDate() {
+  // 1️⃣ İzin iste
+  const { status } = await Calendar.requestCalendarPermissionsAsync();
+  const { status: writeStatus } = await Calendar.requestRemindersPermissionsAsync(); // bazı cihazlarda gerekli
+
+  if (status !== 'granted') {
+    console.log('Takvim izni verilmedi');
+    return;
+  }
+
+  // 2️⃣ Cihazdaki tüm takvimleri getir
+  const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
+  console.log(calendars.map(c => ({ id: c.id, title: c.title, source: c.source })));
+
+
+  // 3️⃣ Hedef tarih: 29 Ekim 2025
+  const targetDate = new Date(2025, 9, 29); // Dikkat: Ay index'i 0'dan başlar → 9 = Ekim
+
+  // 4️⃣ Günün başlangıç ve bitiş zamanlarını belirle
+  const startOfDay = new Date(targetDate.setHours(0, 0, 0, 0));
+  const endOfDay = new Date(targetDate.setHours(23, 59, 59, 999));
+
+  // 5️⃣ Her takvim için etkinlikleri getir
+  let allEvents = [];
+
+  for (const calendar of calendars) {
+    const events = await Calendar.getEventsAsync(
+      [calendar.id],
+      startOfDay,
+      endOfDay
+    );
+
+    if (events.length > 0) {
+      console.log(`📅 ${calendar.title} takviminde:`);
+      for (const e of events) {
+        console.log('—', e.title, e.startDate, e.endDate);
+      }
+    }
+
+    allEvents = [...allEvents, ...events];
+  }
+
+  console.log('Toplam bulunan etkinlik sayısı:', allEvents.length);
+  return allEvents;
+}
+
+// 🔸 Kullanım örneği
+
+
+
+
+
 
   const initializeApp = async () => {
     try {
@@ -87,6 +146,8 @@ const HomeScreen = () => {
       setCalendarPermissionGranted(calendarGranted);
       if (!calendarGranted) {
         console.warn('Takvim izni verilmedi.');
+      } else if (__DEV__) {
+        await CalendarService.debugLogEventsForDate(new Date('2025-10-28T00:00:00'), '29oct-debug');
       }
     } catch (error) {
       console.error('Uygulama başlatma hatası:', error);

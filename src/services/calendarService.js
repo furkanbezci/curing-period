@@ -206,8 +206,20 @@ export class CalendarService {
     const end = new Date(target);
     end.setHours(23, 59, 59, 999);
 
+    const queryStart = new Date(start);
+    const queryEnd = new Date(end);
+    if (Platform.OS === 'android') {
+      queryStart.setDate(queryStart.getDate() - 1);
+      queryEnd.setDate(queryEnd.getDate() + 1);
+    }
+
     try {
       const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
+      // console.log('CalendarService#getEventsForDay calendars', calendars.map(({ id, title, isVisible }) => ({
+      //   id,
+      //   title,
+      //   isVisible,
+      // })));
       const calendarIds = Array.from(
         new Set(
           calendars
@@ -215,13 +227,29 @@ export class CalendarService {
             .filter(Boolean)
         )
       );
+      // console.log('CalendarService#getEventsForDay ids', calendarIds);
+      // console.log('CalendarService#getEventsForDay range', {
+      //   start: start.toISOString(),
+      //   end: end.toISOString(),
+      //   sampleId: sample.id ?? null,
+      //   sampleDueDate: sample.dueDate ?? sample,
+      // });
 
       if (!calendarIds.length) {
+        console.log('CalendarService#getEventsForDay no calendar ids');
         return [];
       }
 
-      const events = await Calendar.getEventsAsync(calendarIds, start, end);
+      const resolvedCalendars = calendarIds
+        .map(id => calendars.find(calendar => calendar.id === id))
+        .filter(Boolean);
+
+      const events = await this.fetchEventsForCalendars(resolvedCalendars, queryStart, queryEnd, {
+        label: 'getEventsForDay',
+        sampleId: sample.id ?? null,
+      });
       if (!events?.length) {
+        console.log('CalendarService#getEventsForDay no events in range');
         return [];
       }
 
@@ -241,10 +269,16 @@ export class CalendarService {
 
         const overlaps = eventStart <= end && eventEnd >= start;
         if (!overlaps) {
+          console.log('CalendarService#getEventsForDay filtered out - overlap fail', {
+            id: event.id,
+            eventStart: eventStart.toISOString(),
+            eventEnd: eventEnd.toISOString(),
+          });
           return false;
         }
 
         if (!sample.cureDate) {
+          console.log('CalendarService#getEventsForDay kept (no cureDate)', event.id);
           return true;
         }
 
@@ -258,6 +292,106 @@ export class CalendarService {
     } catch (error) {
       console.error('Takvim etkinlikleri alınamadı:', error);
       return [];
+    }
+  }
+
+  static async fetchEventsForCalendars(calendars, start, end, context = {}) {
+    const { label = 'debug', sampleId = null, maxEventLogs = 5 } = context;
+    const header = `[CalendarDebug:${label}]`;
+    const aggregated = [];
+        const test = await Calendar.getEventsAsync(["1"], start, end);
+
+     console.log("******************",test,"********************---")
+
+    for (const calendar of calendars) {
+      if (!calendar?.id) {
+        continue;
+      }
+
+      try {
+        const calendarEvents = await Calendar.getEventsAsync([calendar.id], start, end);
+        const count = calendarEvents?.length ?? 0;
+        const calendarTitle = calendar.title || calendar.id || 'Takvim';
+        // console.log(
+        //   `${header} ${calendarTitle} (${calendar.id}) → ${count} etkinlik`,
+        //   {
+        //     rangeStart: start.toISOString(),
+        //     rangeEnd: end.toISOString(),
+        //     sampleId,
+        //   }
+        // );
+
+        if (count > 0) {
+          (calendarEvents ?? [])
+            .slice(0, maxEventLogs)
+            .forEach(event => {
+              // console.log(`${header}   • ${event.title || '(Başlıksız)'}`, {
+              //   eventId: event.id,
+              //   startDate: event.startDate,
+              //   endDate: event.endDate,
+              //   allDay: Boolean(event.allDay),
+              // });
+            });
+          if (count > maxEventLogs) {
+            // console.log(`${header}   • … ${count - maxEventLogs} etkinlik daha`);
+          }
+        }
+
+        aggregated.push(...(calendarEvents ?? []));
+      } catch (calendarError) {
+        // console.error(`${header} ${calendar?.title || calendar?.id || 'Takvim'} okunamadı`, calendarError);
+      }
+    }
+
+    console.log(`${header} toplam`, aggregated.length);
+    return aggregated;
+  }
+
+  static async debugLogEventsForDate(targetDate, label = 'debug') {
+    try {
+      const hasPermission = await this.requestPermissions();
+      if (!hasPermission) {
+        console.log('CalendarService#debugLogEventsForDate no permissions');
+        return;
+      }
+
+      const start = new Date(targetDate);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(targetDate);
+      end.setHours(23, 59, 59, 999);
+      if (Platform.OS === 'android') {
+        start.setDate(start.getDate() - 1);
+        end.setDate(end.getDate() + 1);
+      }
+      console.log ("33jhjhjhjhjjhjhjhjhjhjhjStart",start,"ss",end)
+
+      const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
+      // console.log(`CalendarService#debugLogEventsForDate (${label}) calendars`, calendars.map(calendar => ({
+      //   id: calendar.id,
+      //   title: calendar.title,
+      //   isVisible: calendar.isVisible,
+      // })));
+
+      const calendarIds = calendars.map(calendar => calendar.id).filter(Boolean);
+      if (!calendarIds.length) {
+        // console.log('CalendarService#debugLogEventsForDate no calendar ids');
+        return;
+      }
+
+      const resolvedCalendars = calendarIds
+        .map(id => calendars.find(calendar => calendar.id === id))
+        .filter(Boolean);
+
+        console.log("resolvedCalendars--------resolvedCalendars",resolvedCalendars)
+
+      const events = await this.fetchEventsForCalendars(resolvedCalendars, start, end, { label });
+      // console.log(`CalendarService#debugLogEventsForDate (${label}) range`, {
+      //   start: start.toISOString(),
+      //   end: end.toISOString(),
+      // });
+      console.log(`CalendarService#debugLogEventsForDate (${label}) events`, events);
+    } catch (error) {
+      console.error('CalendarService#debugLogEventsForDate failed', error);
     }
   }
 }
