@@ -41,6 +41,7 @@ const HomeScreen = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [modalMode, setModalMode] = useState('create');
   const [editingSample, setEditingSample] = useState(null);
+  const [selectedFilter, setSelectedFilter] = useState('total');
 
   const persistSaveToGalleryPreference = useCallback(async (enabled) => {
     try {
@@ -351,6 +352,22 @@ const HomeScreen = () => {
     return { total, completed, active, overdue };
   }, [samples]);
 
+  const filteredSamples = useMemo(() => {
+    const now = new Date();
+
+    switch (selectedFilter) {
+      case 'active':
+        return samples.filter(sample => !sample.completed);
+      case 'completed':
+        return samples.filter(sample => sample.completed);
+      case 'overdue':
+        return samples.filter((sample) => !sample.completed && new Date(sample.dueDate) < now);
+      case 'total':
+      default:
+        return samples;
+    }
+  }, [samples, selectedFilter]);
+
   const upcomingSample = useMemo(() => {
     const openSamples = samples
       .filter(sample => !sample.completed)
@@ -383,9 +400,11 @@ const HomeScreen = () => {
         stats={stats}
         upcomingSample={upcomingSample}
         upcomingStatus={upcomingStatus}
+        selectedFilter={selectedFilter}
+        onFilterChange={setSelectedFilter}
       />
     ),
-    [stats, upcomingSample, upcomingStatus]
+    [stats, upcomingSample, upcomingStatus, selectedFilter]
   );
 
   const renderEmptyState = useCallback(() => <SampleEmptyState />, []);
@@ -405,7 +424,7 @@ const HomeScreen = () => {
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.gray[50]} />
 
       <FlatList
-        data={samples}
+        data={filteredSamples}
         keyExtractor={keyExtractor}
         renderItem={renderSample}
         ListHeaderComponent={renderHeader}

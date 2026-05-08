@@ -10,7 +10,7 @@ import {
   ScrollView,
   Switch,
 } from 'react-native';
-import { formatDate, calculateDueDate } from '../utils/dateUtils';
+import { calculateDueDate } from '../utils/dateUtils';
 import { COLORS, CURE_PERIODS } from '../constants';
 import DatePickerField from './DatePickerField';
 import PhotoAttachmentField from './PhotoAttachmentField';
@@ -20,6 +20,23 @@ import { CalendarService } from '../services/calendarService';
 const MODES = {
   create: 'create',
   edit: 'edit',
+};
+
+const getDateSummaryParts = (date) => {
+  const parsedDate = new Date(date);
+
+  return {
+    day: parsedDate.toLocaleDateString('tr-TR', { day: '2-digit' }),
+    month: parsedDate.toLocaleDateString('tr-TR', { month: '2-digit' }),
+    monthName: parsedDate.toLocaleDateString('tr-TR', { month: 'short' }).replace('.', ''),
+    year: parsedDate.toLocaleDateString('tr-TR', {
+      year: 'numeric',
+    }),
+    time: parsedDate.toLocaleTimeString('tr-TR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    }),
+  };
 };
 
 const AddSampleModal = ({
@@ -228,6 +245,10 @@ const AddSampleModal = ({
     setCalendarSyncEnabled(nextValue);
   }, [onCalendarPermissionChange]);
 
+  const todayParts = getDateSummaryParts(new Date());
+  const startDateParts = getDateSummaryParts(startDate);
+  const dueDateParts = getDateSummaryParts(calculateDueDate(startDate, cureDays));
+
   return (
     <Modal
       visible={visible}
@@ -317,14 +338,29 @@ const AddSampleModal = ({
 
             <View style={styles.summary}>
               <Text style={styles.summaryTitle}>📋 Özet</Text>
-              <Text style={styles.summaryText}>
-                <Text style={styles.summaryLabel}>Başlangıç: </Text>
-                {formatDate(startDate)}
+              <Text style={styles.summaryTodayText}>
+                Bugün: {todayParts.day}.{todayParts.month}.{todayParts.year}
               </Text>
-              <Text style={styles.summaryText}>
-                <Text style={styles.summaryLabel}>Bitiş Tarihi: </Text>
-                {formatDate(calculateDueDate(startDate, cureDays))}
-              </Text>
+              <View style={styles.summaryTextRow}>
+                <Text style={styles.summaryText}>
+                  <Text style={styles.summaryLabel}>Başlangıç: </Text>
+                  <Text style={styles.summaryDateEmphasis}>{startDateParts.day}.{startDateParts.month}</Text>
+                  <Text>.{startDateParts.year} {startDateParts.time}</Text>
+                </Text>
+                <View style={styles.monthChip}>
+                  <Text style={styles.monthChipText}>{startDateParts.monthName}</Text>
+                </View>
+              </View>
+              <View style={styles.summaryTextRow}>
+                <Text style={styles.summaryText}>
+                  <Text style={styles.summaryLabel}>Bitiş Tarihi: </Text>
+                  <Text style={styles.summaryDateEmphasis}>{dueDateParts.day}.{dueDateParts.month}</Text>
+                  <Text>.{dueDateParts.year} {dueDateParts.time}</Text>
+                </Text>
+                <View style={[styles.monthChip, styles.monthChipDue]}>
+                  <Text style={styles.monthChipText}>{dueDateParts.monthName}</Text>
+                </View>
+              </View>
               <Text style={styles.summaryText}>
                 <Text style={styles.summaryLabel}>Fotoğraf: </Text>
                 {photo?.uri ? 'Eklendi' : 'Yok'}
@@ -477,12 +513,45 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.dark,
   },
+  summaryTodayText: {
+    fontSize: 12,
+    color: COLORS.gray[500],
+    marginBottom: 8,
+    fontWeight: '500',
+  },
+  summaryTextRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    marginBottom: 6,
+    gap: 6,
+  },
   summaryLabel: {
     fontWeight: '500',
     color: COLORS.gray[600],
   },
+  summaryDateEmphasis: {
+    fontWeight: '700',
+    color: COLORS.dark,
+  },
+  monthChip: {
+    marginLeft: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: COLORS.primary,
+  },
+  monthChipDue: {
+    backgroundColor: COLORS.success,
+  },
+  monthChipText: {
+    color: COLORS.white,
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
   calendarRow: {
-    marginTop: 12,
+    marginTop: 8,
     paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: COLORS.gray[200],

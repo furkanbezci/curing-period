@@ -43,7 +43,8 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: COLORS.white,
     borderRadius: 20,
-    padding: 20,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
     borderWidth: 1,
     borderColor: COLORS.gray[200],
     shadowColor: COLORS.dark,
@@ -100,7 +101,7 @@ const styles = StyleSheet.create({
     width: 1,
     height: '100%',
     backgroundColor: COLORS.gray[200],
-    marginHorizontal: 16,
+    marginHorizontal: 12,
   },
 });
 
