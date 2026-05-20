@@ -42,6 +42,15 @@ const PhotoAttachmentField = ({
         return;
       }
 
+      if (result?.reason === 'media_permission_denied') {
+        Alert.alert(
+          'Galeri İzni Gerekli',
+          'Fotoğrafı galeriye kaydetmek için gereken izin verilmedi. Ayarlardan izin verdikten sonra tekrar deneyebilirsiniz.'
+        );
+        onSaveToGalleryEnabledChange?.(false);
+        return;
+      }
+
       if (result?.reason === 'camera_unavailable') {
         Alert.alert('Kamera Kullanılamıyor', 'Bu cihazda kamera bulunmuyor veya şu anda erişilemiyor.');
         return;

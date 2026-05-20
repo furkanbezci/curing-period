@@ -119,6 +119,50 @@ async function ensureMediaLibraryAccess() {
   }
 }
 
+async function getMediaLibraryAccessStatus() {
+  if (!MediaLibrary) {
+    try {
+      if (typeof ImagePicker.getMediaLibraryPermissionsAsync === 'function') {
+        const pickerStatus = await ImagePicker.getMediaLibraryPermissionsAsync(true);
+        return {
+          granted: pickerStatus?.granted ?? false,
+          canAskAgain: pickerStatus?.canAskAgain !== false,
+        };
+      }
+    } catch (error) {
+      console.error('Galeri izin durumu alınamadı:', error);
+    }
+
+    return { granted: false, canAskAgain: false };
+  }
+
+  try {
+    if (typeof MediaLibrary.getPermissionsAsync === 'function') {
+      const current = await MediaLibrary.getPermissionsAsync();
+      return {
+        granted: hasMediaLibraryAccess(current),
+        canAskAgain: current?.canAskAgain !== false,
+      };
+    }
+  } catch (error) {
+    console.error('Galeri izin durumu alınamadı:', error);
+  }
+
+  try {
+    if (typeof ImagePicker.getMediaLibraryPermissionsAsync === 'function') {
+      const pickerStatus = await ImagePicker.getMediaLibraryPermissionsAsync(true);
+      return {
+        granted: pickerStatus?.granted ?? false,
+        canAskAgain: pickerStatus?.canAskAgain !== false,
+      };
+    }
+  } catch (error) {
+    console.error('Galeri izin durumu alınamadı:', error);
+  }
+
+  return { granted: false, canAskAgain: false };
+}
+
 async function saveToDeviceLibrary(uri) {
   if (!MediaLibrary || !uri) {
     return false;
@@ -295,5 +339,13 @@ export class MediaService {
 
   static async saveToDeviceLibrary(uri) {
     return saveToDeviceLibrary(uri);
+  }
+
+  static async getSaveToGalleryAccessStatus() {
+    return getMediaLibraryAccessStatus();
+  }
+
+  static async ensureSaveToGalleryAccess() {
+    return ensureMediaLibraryAccess();
   }
 }
