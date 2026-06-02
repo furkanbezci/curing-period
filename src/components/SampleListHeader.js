@@ -12,9 +12,7 @@ const SampleListHeader = ({
   onFilterChange,
 }) => (
   <View style={styles.container}>
-    <View style={styles.hero}>
-      <Text style={styles.heroTitle}>Numuneler</Text>
-    </View>
+   
 
     <StatsOverview
       stats={stats}
