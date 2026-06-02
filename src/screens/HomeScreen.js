@@ -1,14 +1,15 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
   FlatList,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
   StatusBar,
   Alert,
+  Linking,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import SampleCard from '../components/SampleCard';
 import AddSampleModal from '../components/AddSampleModal';
 import SampleListHeader from '../components/SampleListHeader';
@@ -19,16 +20,28 @@ import { MediaService } from '../services/mediaService';
 import { CalendarService } from '../services/calendarService';
 import { COLORS } from '../constants';
 import { getRemainingTime } from '../utils/dateUtils';
-import * as Calendar from 'expo-calendar';
+import { useAppInitialization } from '../hooks/useAppInitialization';
+
+const openAppSettingsAlertButtons = [
+  { text: 'Ayarlara Git', onPress: () => Linking.openSettings() },
+  { text: 'Tamam', style: 'cancel' },
+];
 
 const HomeScreen = () => {
-  const [samples, setSamples] = useState([]);
-  const [modalVisible, setModalVisible] = useState(true);
+  const {
+    loading,
+    samples,
+    setSamples,
+    saveToGalleryEnabled,
+    setSaveToGalleryEnabled,
+    calendarPermissionGranted,
+    setCalendarPermissionGranted,
+  } = useAppInitialization();
+
+  const [modalVisible, setModalVisible] = useState(false);
   const [modalMode, setModalMode] = useState('create');
   const [editingSample, setEditingSample] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [calendarPermissionGranted, setCalendarPermissionGranted] = useState(false);
-  const [saveToGalleryEnabled, setSaveToGalleryEnabled] = useState(true);
+  const [selectedFilter, setSelectedFilter] = useState('total');
 
   const persistSaveToGalleryPreference = useCallback(async (enabled) => {
     try {
@@ -41,130 +54,6 @@ const HomeScreen = () => {
       console.error('Galeri tercihi kaydedilemedi:', error);
     }
   }, []);
-
-  useEffect(() => {
-    initializeApp();
-  }, []);
-useEffect(() => {
-  getEventsOnSpecificDate();
-}, []);
-
-
-
-  async function getEventsOnSpecificDate() {
-  // 1️⃣ İzin iste
-  const { status } = await Calendar.requestCalendarPermissionsAsync();
-  const { status: writeStatus } = await Calendar.requestRemindersPermissionsAsync(); // bazı cihazlarda gerekli
-
-  if (status !== 'granted') {
-    console.log('Takvim izni verilmedi');
-    return;
-  }
-
-  // 2️⃣ Cihazdaki tüm takvimleri getir
-  const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
-  console.log(calendars.map(c => ({ id: c.id, title: c.title, source: c.source })));
-
-
-  // 3️⃣ Hedef tarih: 29 Ekim 2025
-  const targetDate = new Date(2025, 9, 29); // Dikkat: Ay index'i 0'dan başlar → 9 = Ekim
-
-  // 4️⃣ Günün başlangıç ve bitiş zamanlarını belirle
-  const startOfDay = new Date(targetDate.setHours(0, 0, 0, 0));
-  const endOfDay = new Date(targetDate.setHours(23, 59, 59, 999));
-
-  // 5️⃣ Her takvim için etkinlikleri getir
-  let allEvents = [];
-
-  for (const calendar of calendars) {
-    const events = await Calendar.getEventsAsync(
-      [calendar.id],
-      startOfDay,
-      endOfDay
-    );
-
-    if (events.length > 0) {
-      console.log(`📅 ${calendar.title} takviminde:`);
-      for (const e of events) {
-        console.log('—', e.title, e.startDate, e.endDate);
-      }
-    }
-
-    allEvents = [...allEvents, ...events];
-  }
-
-  console.log('Toplam bulunan etkinlik sayısı:', allEvents.length);
-  return allEvents;
-}
-
-// 🔸 Kullanım örneği
-
-
-
-
-
-
-  const initializeApp = async () => {
-    try {
-      await NotificationService.initialize();
-      const hasPermission = await NotificationService.requestPermissions();
-      
-      if (!hasPermission) {
-        Alert.alert(
-          'Bildirim İzni',
-          'Bildirimler için izin verilmedi. Uygulama tam işlevsel olmayabilir.'
-        );
-      }
-
-      await loadSamples();
-
-      const storedSettings = (await StorageService.loadSettings()) || {};
-      let initialSavePreference = typeof storedSettings.saveToGalleryEnabled === 'boolean'
-        ? storedSettings.saveToGalleryEnabled
-        : true;
-
-      if (initialSavePreference) {
-        try {
-          const galleryStatus = await MediaService.getSaveToGalleryAccessStatus();
-          if (!galleryStatus.granted) {
-            initialSavePreference = false;
-            await StorageService.saveSettings({
-              ...storedSettings,
-              saveToGalleryEnabled: false,
-            });
-          }
-        } catch (error) {
-          console.error('Galeri izin durumu kontrol edilemedi:', error);
-          initialSavePreference = false;
-        }
-      }
-
-      setSaveToGalleryEnabled(initialSavePreference);
-
-      const calendarGranted = await CalendarService.requestPermissions();
-      console.log("√calendarGranted",calendarGranted)
-      setCalendarPermissionGranted(calendarGranted);
-      if (!calendarGranted) {
-        console.warn('Takvim izni verilmedi.');
-      } else if (__DEV__) {
-        await CalendarService.debugLogEventsForDate(new Date('2025-10-28T00:00:00'), '29oct-debug');
-      }
-    } catch (error) {
-      console.error('Uygulama başlatma hatası:', error);
-      Alert.alert('Hata', 'Uygulama başlatılamadı.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadSamples = async () => {
-    try {
-      const loadedSamples = await StorageService.loadSamples();
-      setSamples(loadedSamples);
-    } catch (error) {
-      console.error('Numuneler yüklenemedi:', error);
-    }
-  };
 
   const handleAddSample = useCallback(async (sample) => {
     try {
@@ -371,7 +260,8 @@ useEffect(() => {
         if (!hasPermission) {
           Alert.alert(
             'Galeri İzni',
-            'Fotoğrafı galeride saklamak için gereken izin verilmedi. Ayarlardan izin verdikten sonra tekrar deneyebilirsiniz.'
+            'Fotoğrafı galeride saklamak için fotoğraflara erişim gerekir. Daha önce reddettiyseniz iOS tekrar soru sormaz; izni Ayarlar üzerinden açmanız gerekir.',
+            openAppSettingsAlertButtons
           );
           setSaveToGalleryEnabled(false);
           await persistSaveToGalleryPreference(false);
@@ -400,7 +290,8 @@ useEffect(() => {
         } else if (result.reason === 'media_permission_denied') {
           Alert.alert(
             'Galeri İzni',
-            'Fotoğrafı galeride saklamak için galeri erişim izni verilmedi. Ayarlardan izin verene kadar bu özellik kapalı durumda kalacak.'
+            'Galeriye kayıt için izin verilmedi veya daha önce reddedildi. İzni Ayarlar > Uygulama > Fotoğraflar üzerinden açabilirsiniz.',
+            openAppSettingsAlertButtons
           );
           setSaveToGalleryEnabled(false);
           await persistSaveToGalleryPreference(false);
@@ -461,6 +352,22 @@ useEffect(() => {
     return { total, completed, active, overdue };
   }, [samples]);
 
+  const filteredSamples = useMemo(() => {
+    const now = new Date();
+
+    switch (selectedFilter) {
+      case 'active':
+        return samples.filter(sample => !sample.completed);
+      case 'completed':
+        return samples.filter(sample => sample.completed);
+      case 'overdue':
+        return samples.filter((sample) => !sample.completed && new Date(sample.dueDate) < now);
+      case 'total':
+      default:
+        return samples;
+    }
+  }, [samples, selectedFilter]);
+
   const upcomingSample = useMemo(() => {
     const openSamples = samples
       .filter(sample => !sample.completed)
@@ -493,9 +400,11 @@ useEffect(() => {
         stats={stats}
         upcomingSample={upcomingSample}
         upcomingStatus={upcomingStatus}
+        selectedFilter={selectedFilter}
+        onFilterChange={setSelectedFilter}
       />
     ),
-    [stats, upcomingSample, upcomingStatus]
+    [stats, upcomingSample, upcomingStatus, selectedFilter]
   );
 
   const renderEmptyState = useCallback(() => <SampleEmptyState />, []);
@@ -515,7 +424,7 @@ useEffect(() => {
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.gray[50]} />
 
       <FlatList
-        data={samples}
+        data={filteredSamples}
         keyExtractor={keyExtractor}
         renderItem={renderSample}
         ListHeaderComponent={renderHeader}

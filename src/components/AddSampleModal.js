@@ -10,7 +10,7 @@ import {
   ScrollView,
   Switch,
 } from 'react-native';
-import { formatDate, calculateDueDate } from '../utils/dateUtils';
+import { calculateDueDate } from '../utils/dateUtils';
 import { COLORS, CURE_PERIODS } from '../constants';
 import DatePickerField from './DatePickerField';
 import PhotoAttachmentField from './PhotoAttachmentField';
@@ -20,6 +20,24 @@ import { CalendarService } from '../services/calendarService';
 const MODES = {
   create: 'create',
   edit: 'edit',
+};
+const MAX_MULTI_CURE_INPUTS = 5;
+
+const getDateSummaryParts = (date) => {
+  const parsedDate = new Date(date);
+
+  return {
+    day: parsedDate.toLocaleDateString('tr-TR', { day: '2-digit' }),
+    month: parsedDate.toLocaleDateString('tr-TR', { month: '2-digit' }),
+    monthName: parsedDate.toLocaleDateString('tr-TR', { month: 'short' }).replace('.', ''),
+    year: parsedDate.toLocaleDateString('tr-TR', {
+      year: 'numeric',
+    }),
+    time: parsedDate.toLocaleTimeString('tr-TR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    }),
+  };
 };
 
 const AddSampleModal = ({
@@ -39,6 +57,8 @@ const AddSampleModal = ({
   const [startDate, setStartDate] = useState(new Date());
   const [photo, setPhoto] = useState(null);
   const [calendarSyncEnabled, setCalendarSyncEnabled] = useState(calendarPermissionsGranted);
+  const [multiDateEnabled, setMultiDateEnabled] = useState(false);
+  const [multiCureDays, setMultiCureDays] = useState(['28']);
   const originalPhotoUriRef = useRef(null);
   const isEdit = mode === MODES.edit;
 
@@ -49,11 +69,23 @@ const AddSampleModal = ({
     }
 
     if (isEdit && initialSample) {
+      const existingSchedules = Array.isArray(initialSample.cureSchedules) && initialSample.cureSchedules.length > 0
+        ? initialSample.cureSchedules
+        : [{ cureDays: initialSample.cureDays, dueDate: initialSample.dueDate }];
+      const parsedCureDays = existingSchedules
+        .map((schedule) => Number(schedule.cureDays))
+        .filter((value) => Number.isFinite(value) && value > 0)
+        .sort((a, b) => a - b);
+      const baseCureDay = parsedCureDays[0] ?? initialSample.cureDays ?? 28;
+      const isMultiSample = parsedCureDays.length > 1;
+
       setSampleName(initialSample.name ?? '');
-      setCureDays(initialSample.cureDays ?? 28);
+      setCureDays(baseCureDay);
       setStartDate(initialSample.cureDate ? new Date(initialSample.cureDate) : new Date());
       setPhoto(initialSample.photoUri ? { uri: initialSample.photoUri, size: null, isNew: false } : null);
       setCalendarSyncEnabled(Boolean(initialSample.calendarSyncEnabled ?? initialSample.calendarEventId));
+      setMultiCureDays((isMultiSample ? parsedCureDays : [baseCureDay]).map((value) => String(value)));
+      setMultiDateEnabled(isMultiSample);
       originalPhotoUriRef.current = initialSample.photoUri ?? null;
     } else {
       resetForm();
@@ -73,13 +105,28 @@ const AddSampleModal = ({
       return;
     }
 
-    if (cureDays <= 0) {
+    if (!multiDateEnabled && cureDays <= 0) {
       Alert.alert('Hata', 'Kür süresi 0\'dan büyük olmalıdır.');
       return;
     }
 
     const selectedStartDate = startDate instanceof Date ? startDate : new Date(startDate);
-    const dueDate = calculateDueDate(selectedStartDate, cureDays);
+    const selectedCureDays = (multiDateEnabled ? multiCureDays : [cureDays])
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0)
+      .filter((value, index, arr) => arr.indexOf(value) === index)
+      .sort((a, b) => a - b);
+
+    if (selectedCureDays.length === 0) {
+      Alert.alert('Hata', 'En az bir geçerli kür süresi seçin.');
+      return;
+    }
+
+    const cureSchedules = selectedCureDays.map((days) => ({
+      cureDays: days,
+      dueDate: calculateDueDate(selectedStartDate, days).toISOString(),
+    }));
+    const primarySchedule = cureSchedules[0];
     const createdAt = isEdit && initialSample?.createdAt
       ? new Date(initialSample.createdAt)
       : new Date();
@@ -89,8 +136,9 @@ const AddSampleModal = ({
       id: initialSample?.id ?? Date.now().toString(),
       name: sampleName.trim(),
       cureDate: selectedStartDate.toISOString(),
-      cureDays,
-      dueDate: dueDate.toISOString(),
+      cureDays: primarySchedule.cureDays,
+      dueDate: primarySchedule.dueDate,
+      cureSchedules,
       completed: initialSample?.completed ?? false,
       createdAt: createdAt.toISOString(),
       photoUri: finalPhotoUri,
@@ -185,6 +233,8 @@ const AddSampleModal = ({
     setStartDate(new Date());
     setPhoto(null);
     setCalendarSyncEnabled(calendarPermissionsGranted);
+    setMultiDateEnabled(false);
+    setMultiCureDays(['28']);
     originalPhotoUriRef.current = null;
   };
 
@@ -227,6 +277,20 @@ const AddSampleModal = ({
 
     setCalendarSyncEnabled(nextValue);
   }, [onCalendarPermissionChange]);
+
+  const selectedCureScheduleDays = (multiDateEnabled ? multiCureDays : [cureDays])
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .filter((value, index, arr) => arr.indexOf(value) === index)
+    .sort((a, b) => a - b);
+  const dueDate = calculateDueDate(startDate, selectedCureScheduleDays[0] ?? cureDays);
+  const isLockedMultiSample = isEdit
+    && Array.isArray(initialSample?.cureSchedules)
+    && initialSample.cureSchedules.length > 1;
+
+  const todayParts = getDateSummaryParts(new Date());
+  const startDateParts = getDateSummaryParts(startDate);
+  const dueDateParts = getDateSummaryParts(dueDate);
 
   return (
     <Modal
@@ -283,52 +347,165 @@ const AddSampleModal = ({
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Kür Süresi</Text>
-              <View style={styles.periodButtons}>
-                {CURE_PERIODS.map((period) => (
-                  <TouchableOpacity
-                    key={period.value}
-                    style={[
-                      styles.periodButton,
-                      cureDays === period.value && styles.periodButtonActive,
-                    ]}
-                    onPress={() => setCureDays(period.value)}
-                  >
-                    <Text
-                      style={[
-                        styles.periodButtonText,
-                        cureDays === period.value && styles.periodButtonTextActive,
-                      ]}
-                    >
-                      {period.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+              <View style={styles.multiDateToggleRow}>
+                <View style={styles.multiDateInfo}>
+                  <Text style={styles.summaryLabel}>Çoklu Döküm</Text>
+                  <Text style={styles.calendarHelpText}>
+                    Aynı numuneye ait farklı kür süreleri.
+                  </Text>
+                </View>
+                <Switch
+                  value={multiDateEnabled}
+                  onValueChange={(nextValue) => {
+                    if (isLockedMultiSample && !nextValue) {
+                      return;
+                    }
+                    setMultiDateEnabled(nextValue);
+                    if (nextValue) {
+                      setMultiCureDays((prev) => {
+                        if (prev.length > 0) {
+                          return prev;
+                        }
+                        return [String(cureDays || 28)];
+                      });
+                    }
+                  }}
+                  disabled={isLockedMultiSample}
+                  trackColor={{ false: COLORS.gray[300], true: COLORS.primary }}
+                  thumbColor={COLORS.white}
+                />
               </View>
-              
-              <TextInput
-                style={styles.input}
-                value={cureDays.toString()}
-                onChangeText={(text) => setCureDays(parseInt(text) || 0)}
-                keyboardType="numeric"
-                placeholder="Özel süre girin"
-                placeholderTextColor={COLORS.gray[400]}
-              />
+
+              {multiDateEnabled ? (
+                <View style={styles.additionalPeriodsContainer}>
+                  <Text style={styles.labelSmall}>Kür Günleri</Text>
+                  <Text style={styles.multiInputLimitText}>
+                    En fazla {MAX_MULTI_CURE_INPUTS} tarih girebilirsiniz.
+                  </Text>
+                  <View style={styles.multiInputsContainer}>
+                    {multiCureDays.map((value, index) => (
+                      <View key={`multi-day-${index}`} style={styles.multiInputRow}>
+                        <TextInput
+                          style={[styles.input, styles.multiInput]}
+                          value={value}
+                          onChangeText={(text) => {
+                            const sanitized = text.replace(/[^0-9]/g, '');
+                            setMultiCureDays((prev) => prev.map((item, i) => (i === index ? sanitized : item)));
+                          }}
+                          keyboardType="numeric"
+                          placeholder="Gün"
+                          placeholderTextColor={COLORS.gray[400]}
+                        />
+                        <Text style={styles.multiInputSuffix}>gün</Text>
+                        <TouchableOpacity
+                          style={styles.multiInputAction}
+                          onPress={() => {
+                            setMultiCureDays((prev) => {
+                              if (prev.length <= 1) {
+                                return prev;
+                              }
+                              return prev.filter((_, i) => i !== index);
+                            });
+                          }}
+                        >
+                          <Text style={styles.multiInputActionText}>Sil</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                  <TouchableOpacity
+                    style={[
+                      styles.addMultiInputButton,
+                      multiCureDays.length >= MAX_MULTI_CURE_INPUTS && styles.addMultiInputButtonDisabled,
+                    ]}
+                    onPress={() => {
+                      if (multiCureDays.length >= MAX_MULTI_CURE_INPUTS) {
+                        return;
+                      }
+                      setMultiCureDays((prev) => [...prev, '']);
+                    }}
+                    disabled={multiCureDays.length >= MAX_MULTI_CURE_INPUTS}
+                  >
+                    <Text style={styles.addMultiInputButtonText}>+ Kür günü ekle</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <>
+                  <View style={styles.periodButtons}>
+                    {CURE_PERIODS.map((period) => (
+                      <TouchableOpacity
+                        key={period.value}
+                        style={[
+                          styles.periodButton,
+                          cureDays === period.value && styles.periodButtonActive,
+                        ]}
+                        onPress={() => setCureDays(period.value)}
+                      >
+                        <Text
+                          style={[
+                            styles.periodButtonText,
+                            cureDays === period.value && styles.periodButtonTextActive,
+                          ]}
+                        >
+                          {period.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <TextInput
+                    style={styles.input}
+                    value={cureDays.toString()}
+                    onChangeText={(text) => setCureDays(parseInt(text, 10) || 0)}
+                    keyboardType="numeric"
+                    placeholder="Özel süre girin"
+                    placeholderTextColor={COLORS.gray[400]}
+                  />
+                </>
+              )}
             </View>
 
             <View style={styles.summary}>
               <Text style={styles.summaryTitle}>📋 Özet</Text>
-              <Text style={styles.summaryText}>
-                <Text style={styles.summaryLabel}>Başlangıç: </Text>
-                {formatDate(startDate)}
+              <Text style={styles.summaryTodayText}>
+                Bugün: {todayParts.day}.{todayParts.month}.{todayParts.year}
               </Text>
-              <Text style={styles.summaryText}>
-                <Text style={styles.summaryLabel}>Bitiş Tarihi: </Text>
-                {formatDate(calculateDueDate(startDate, cureDays))}
-              </Text>
+              <View style={styles.summaryTextRow}>
+                <Text style={styles.summaryText}>
+                  <Text style={styles.summaryLabel}>Başlangıç: </Text>
+                  <Text style={styles.summaryDateEmphasis}>{startDateParts.day}.{startDateParts.month}</Text>
+                  <Text>.{startDateParts.year} {startDateParts.time}</Text>
+                </Text>
+                <View style={styles.monthChip}>
+                  <Text style={styles.monthChipText}>{startDateParts.monthName}</Text>
+                </View>
+              </View>
+              <View style={styles.summaryTextRow}>
+                <Text style={styles.summaryText}>
+                  <Text style={styles.summaryLabel}>Bitiş Tarihi: </Text>
+                  <Text style={styles.summaryDateEmphasis}>{dueDateParts.day}.{dueDateParts.month}</Text>
+                  <Text>.{dueDateParts.year} {dueDateParts.time}</Text>
+                </Text>
+                <View style={[styles.monthChip, styles.monthChipDue]}>
+                  <Text style={styles.monthChipText}>{dueDateParts.monthName}</Text>
+                </View>
+              </View>
               <Text style={styles.summaryText}>
                 <Text style={styles.summaryLabel}>Fotoğraf: </Text>
                 {photo?.uri ? 'Eklendi' : 'Yok'}
               </Text>
+              {selectedCureScheduleDays.length > 1 ? (
+                <View style={styles.multiSummaryContainer}>
+                  <Text style={styles.summaryLabel}>Kür Planları</Text>
+                  {selectedCureScheduleDays.map((days) => {
+                    const scheduleDueDate = getDateSummaryParts(calculateDueDate(startDate, days));
+                    return (
+                      <Text key={`summary-${days}`} style={styles.multiSummaryItem}>
+                        {days} gün - {scheduleDueDate.day}.{scheduleDueDate.month}.{scheduleDueDate.year} {scheduleDueDate.time}
+                      </Text>
+                    );
+                  })}
+                </View>
+              ) : null}
               <View style={styles.calendarRow}>
                 <View style={styles.calendarInfo}>
                   <Text style={styles.summaryLabel}>Takvime ekle</Text>
@@ -428,6 +605,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: COLORS.dark,
     backgroundColor: COLORS.white,
+    height: 40,
   },
   dateInfoSubtext: {
     fontSize: 14,
@@ -460,6 +638,84 @@ const styles = StyleSheet.create({
   periodButtonTextActive: {
     color: COLORS.white,
   },
+  multiDateToggleRow: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.gray[200],
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  multiDateInfo: {
+    flex: 1,
+    marginBottom: 13,
+  },
+  additionalPeriodsContainer: {
+    marginTop: 12,
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: COLORS.gray[50],
+    borderWidth: 1,
+    borderColor: COLORS.gray[200],
+  },
+  labelSmall: {
+    fontSize: 13,
+    color: COLORS.gray[700],
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  multiInputLimitText: {
+    fontSize: 12,
+    color: COLORS.gray[500],
+    marginBottom: 8,
+  },
+  multiInputsContainer: {
+    gap: 8,
+  },
+  multiInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  multiInput: {
+    flex: 1,
+  },
+  multiInputSuffix: {
+    fontSize: 14,
+    color: COLORS.gray[600],
+    fontWeight: '600',
+    minWidth: 30,
+  },
+  multiInputAction: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: COLORS.gray[100],
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+  },
+  multiInputActionText: {
+    fontSize: 12,
+    color: COLORS.danger,
+    fontWeight: '600',
+  },
+  addMultiInputButton: {
+    marginTop: 10,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#EEF2FF',
+    alignItems: 'center',
+  },
+  addMultiInputButtonDisabled: {
+    opacity: 0.5,
+  },
+  addMultiInputButtonText: {
+    fontSize: 13,
+    color: COLORS.primary,
+    fontWeight: '700',
+  },
   summary: {
     backgroundColor: COLORS.light,
     borderRadius: 8,
@@ -477,12 +733,45 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.dark,
   },
+  summaryTodayText: {
+    fontSize: 12,
+    color: COLORS.gray[500],
+    marginBottom: 8,
+    fontWeight: '500',
+  },
+  summaryTextRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    marginBottom: 6,
+    gap: 6,
+  },
   summaryLabel: {
     fontWeight: '500',
     color: COLORS.gray[600],
   },
+  summaryDateEmphasis: {
+    fontWeight: '700',
+    color: COLORS.dark,
+  },
+  monthChip: {
+    marginLeft: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: COLORS.primary,
+  },
+  monthChipDue: {
+    backgroundColor: COLORS.success,
+  },
+  monthChipText: {
+    color: COLORS.white,
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
   calendarRow: {
-    marginTop: 12,
+    marginTop: 8,
     paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: COLORS.gray[200],
@@ -498,6 +787,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.gray[500],
     marginTop: 2,
+  },
+  multiSummaryContainer: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.gray[200],
+    gap: 4,
+  },
+  multiSummaryItem: {
+    fontSize: 13,
+    color: COLORS.gray[700],
   },
   footer: {
     flexDirection: 'row',
