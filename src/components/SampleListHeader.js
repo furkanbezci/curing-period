@@ -4,13 +4,21 @@ import { COLORS } from '../constants';
 import StatsOverview from './StatsOverview';
 import UpcomingSampleCard from './UpcomingSampleCard';
 
-const SampleListHeader = ({ stats, upcomingSample, upcomingStatus }) => (
+const SampleListHeader = ({
+  stats,
+  upcomingSample,
+  upcomingStatus,
+  selectedFilter,
+  onFilterChange,
+}) => (
   <View style={styles.container}>
-    <View style={styles.hero}>
-      <Text style={styles.heroTitle}>Beton Kür Kontrol Paneli</Text>
-    </View>
+   
 
-    <StatsOverview stats={stats} />
+    <StatsOverview
+      stats={stats}
+      selectedKey={selectedFilter}
+      onSelectFilter={onFilterChange}
+    />
 
     {upcomingSample ? (
       <UpcomingSampleCard sample={upcomingSample} status={upcomingStatus} />
@@ -22,22 +30,23 @@ const SampleListHeader = ({ stats, upcomingSample, upcomingStatus }) => (
 
 const styles = StyleSheet.create({
   container: {
-    gap: 20,
-    paddingTop: 24,
+    gap: 16,
+    paddingTop: 20,
     paddingBottom: 12,
   },
   hero: {
-    backgroundColor: '#EEF2FF',
-    borderRadius: 24,
-    paddingVertical: 20,
-    paddingHorizontal: 24,
+    backgroundColor: '#EEF2FA',
+    borderRadius: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 8,
     justifyContent: 'center',
     alignItems: 'flex-start',
   },
   heroTitle: {
-    fontSize: 22,
+    fontSize: 20,
     color: COLORS.primary,
     fontWeight: '700',
+    lineHeight: 26,
   },
   sectionTitle: {
     fontSize: 18,

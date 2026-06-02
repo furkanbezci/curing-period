@@ -24,6 +24,19 @@ const SampleCard = ({ sample, onToggleComplete, onDelete, onEdit, onCapturePhoto
   const [imageVisible, setImageVisible] = useState(false);
   const [saving, setSaving] = useState(false);
   const [capturing, setCapturing] = useState(false);
+  const [showAllSchedules, setShowAllSchedules] = useState(false);
+  const cureSchedules = Array.isArray(sample.cureSchedules) && sample.cureSchedules.length > 0
+    ? sample.cureSchedules
+        .map((item) => ({
+          cureDays: Number(item.cureDays),
+          dueDate: item.dueDate,
+        }))
+        .filter((item) => Number.isFinite(item.cureDays) && item.cureDays > 0 && item.dueDate)
+        .sort((a, b) => a.cureDays - b.cureDays)
+    : [{ cureDays: sample.cureDays, dueDate: sample.dueDate }];
+  const visibleSchedules = showAllSchedules ? cureSchedules : cureSchedules.slice(0, 3);
+  const hiddenScheduleCount = Math.max(0, cureSchedules.length - visibleSchedules.length);
+  const isMultiSample = cureSchedules.length > 1;
 
   const handleToggle = () => onToggleComplete(sample.id);
   const handleDelete = () => {
@@ -84,7 +97,7 @@ const SampleCard = ({ sample, onToggleComplete, onDelete, onEdit, onCapturePhoto
     <Container
       style={[
         styles.card,
-        { borderColor: `${accentColor}55`, backgroundColor: sample.completed ? '#F5FFF8' : COLORS.white },
+        { borderColor: `${accentColor}55`, backgroundColor: sample.completed ? COLORS.surfaceSuccess : COLORS.white },
       ]}
       onPress={onEdit ? () => onEdit(sample) : undefined}
     >
@@ -94,8 +107,17 @@ const SampleCard = ({ sample, onToggleComplete, onDelete, onEdit, onCapturePhoto
             {sample.name}
           </Text>
           <Text style={styles.subLabel}>
-            <Text style={styles.subLabelStrong}>{sample.cureDays}</Text>
-            <Text style={styles.subLabelSuffix}> günlük kür</Text>
+            {cureSchedules.length > 1 ? (
+              <>
+                <Text style={styles.subLabelStrong}>{cureSchedules.length}</Text>
+                <Text style={styles.subLabelSuffix}> farklı kür planı</Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.subLabelStrong}>{sample.cureDays}</Text>
+                <Text style={styles.subLabelSuffix}> günlük kür</Text>
+              </>
+            )}
           </Text>
         </View>
         <View style={[styles.statusBadge, { backgroundColor: pillColor }]}> 
@@ -103,17 +125,101 @@ const SampleCard = ({ sample, onToggleComplete, onDelete, onEdit, onCapturePhoto
         </View>
       </View>
 
-      <View style={styles.detailCard}>
+      <View style={[styles.detailCard, !isMultiSample && styles.detailCardSingle]}>
         <View style={styles.detailInfo}>
           <Text style={styles.infoLabel}>Başlangıç</Text>
           <Text style={styles.infoValue}>{formatDate(sample.cureDate)}</Text>
           <View style={styles.infoDividerHorizontal} />
-          <Text style={styles.infoLabel}>Bitiş</Text>
-          <Text style={[styles.infoValue, { color: accentColor }]}>{formatDate(sample.dueDate)}</Text>
+          {isMultiSample ? (
+            <View style={styles.scheduleSection}>
+              <Text style={styles.infoLabel}>Kür Planları</Text>
+              {visibleSchedules.map((schedule) => {
+                const rowStatus = getStatusInfo(schedule.dueDate, sample.completed);
+                const statusColor = rowStatus.status === 'urgent' ? COLORS.gray[700] : rowStatus.color;
+                return (
+                  <Text key={`${sample.id}-${schedule.cureDays}`} style={styles.scheduleLine}>
+                    <Text style={styles.scheduleLineStrong}>{schedule.cureDays} gün</Text>
+                    <Text style={styles.scheduleLineText}> - {formatDate(schedule.dueDate)} - </Text>
+                    <Text style={[styles.scheduleLineStrong, { color: statusColor }]}>{rowStatus.text}</Text>
+                  </Text>
+                );
+              })}
+              {cureSchedules.length > 3 ? (
+                <TouchableOpacity
+                  style={styles.morePlansButton}
+                  onPress={(event) => {
+                    event.stopPropagation?.();
+                    setShowAllSchedules((prev) => !prev);
+                  }}
+                  activeOpacity={0.75}
+                >
+                  <Text style={styles.morePlansButtonText}>
+                    {showAllSchedules ? 'Daha az göster' : `+${hiddenScheduleCount} plan daha`}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          ) : (
+            <>
+              <Text style={styles.infoLabel}>Bitiş</Text>
+              <Text style={[styles.infoValue, { color: accentColor }]}>{formatDate(sample.dueDate)}</Text>
+            </>
+          )}
         </View>
 
-        {sample.photoUri ? (
-          <View style={styles.photoWrapper}>
+        {!isMultiSample ? (
+          sample.photoUri ? (
+            <View style={styles.photoWrapper}>
+              <TouchableOpacity
+                onPress={(event) => {
+                  event.stopPropagation?.();
+                  setImageVisible(true);
+                }}
+                activeOpacity={0.85}
+              >
+                <Image source={{ uri: sample.photoUri }} style={styles.detailPhoto} />
+              </TouchableOpacity>
+
+              {onCapturePhoto ? (
+                <TouchableOpacity
+                  style={styles.retakeButton}
+                  onPress={(event) => {
+                    event.stopPropagation?.();
+                    handleCapturePress();
+                  }}
+                  disabled={capturing}
+                  activeOpacity={0.75}
+                >
+                  <Feather name="camera" size={16} color={COLORS.white} />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.detailPhotoPlaceholder}
+              onPress={(event) => {
+                event.stopPropagation?.();
+                handleCapturePress();
+              }}
+              activeOpacity={0.75}
+              disabled={capturing}
+            >
+              {capturing ? (
+                <ActivityIndicator color={COLORS.primary} />
+              ) : (
+                <>
+                  <Feather name="camera" size={28} color={COLORS.gray[400]} />
+                  <Text style={styles.photoPlaceholderText}>Fotoğraf eklenmedi</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )
+        ) : null}
+      </View>
+
+      {isMultiSample && showAllSchedules ? (
+        <View style={styles.multiPhotoSection}>
+          {sample.photoUri ? (
             <TouchableOpacity
               onPress={(event) => {
                 event.stopPropagation?.();
@@ -121,44 +227,44 @@ const SampleCard = ({ sample, onToggleComplete, onDelete, onEdit, onCapturePhoto
               }}
               activeOpacity={0.85}
             >
-              <Image source={{ uri: sample.photoUri }} style={styles.detailPhoto} />
+              <Image source={{ uri: sample.photoUri }} style={styles.multiDetailPhoto} />
             </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.multiDetailPhotoPlaceholder}
+              onPress={(event) => {
+                event.stopPropagation?.();
+                handleCapturePress();
+              }}
+              activeOpacity={0.75}
+              disabled={capturing}
+            >
+              {capturing ? (
+                <ActivityIndicator color={COLORS.primary} />
+              ) : (
+                <>
+                  <Feather name="camera" size={28} color={COLORS.gray[400]} />
+                  <Text style={styles.photoPlaceholderText}>Fotoğraf eklenmedi</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
 
-            {onCapturePhoto ? (
-              <TouchableOpacity
-                style={styles.retakeButton}
-                onPress={(event) => {
-                  event.stopPropagation?.();
-                  handleCapturePress();
-                }}
-                disabled={capturing}
-                activeOpacity={0.75}
-              >
-                <Feather name="camera" size={16} color={COLORS.white} />
-              </TouchableOpacity>
-            ) : null}
-          </View>
-        ) : (
-          <TouchableOpacity
-            style={styles.detailPhotoPlaceholder}
-            onPress={(event) => {
-              event.stopPropagation?.();
-              handleCapturePress();
-            }}
-            activeOpacity={0.75}
-            disabled={capturing}
-          >
-            {capturing ? (
-              <ActivityIndicator color={COLORS.primary} />
-            ) : (
-              <>
-                <Feather name="camera" size={28} color={COLORS.gray[400]} />
-                <Text style={styles.photoPlaceholderText}>Fotoğraf eklenmedi</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        )}
-      </View>
+          {onCapturePhoto ? (
+            <TouchableOpacity
+              style={styles.retakeButton}
+              onPress={(event) => {
+                event.stopPropagation?.();
+                handleCapturePress();
+              }}
+              disabled={capturing}
+              activeOpacity={0.75}
+            >
+              <Feather name="camera" size={16} color={COLORS.white} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      ) : null}
 
       <View style={styles.actions}>
         <TouchableOpacity
@@ -288,6 +394,9 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   detailCard: {
+    gap: 12,
+  },
+  detailCardSingle: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -311,6 +420,28 @@ const styles = StyleSheet.create({
   photoWrapper: {
     position: 'relative',
   },
+  multiPhotoSection: {
+    position: 'relative',
+    width: '100%',
+    alignItems: 'stretch',
+  },
+  multiDetailPhoto: {
+    width: '100%',
+    maxWidth: 260,
+    aspectRatio: 16 / 9,
+    backgroundColor: COLORS.gray[100],
+    borderRadius: 18,
+  },
+  multiDetailPhotoPlaceholder: {
+    width: '100%',
+    maxWidth: 260,
+    aspectRatio: 2.3,
+    backgroundColor: COLORS.gray[100],
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: 14,
+  },
   retakeButton: {
     position: 'absolute',
     right: 8,
@@ -318,7 +449,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: 'rgba(0,0,0,0.65)',
+    backgroundColor: COLORS.overlayDark65,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -349,6 +480,34 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.dark,
   },
+  scheduleSection: {
+    gap: 4,
+  },
+  scheduleLine: {
+    fontSize: 13,
+    color: COLORS.gray[700],
+  },
+  scheduleLineText: {
+    color: COLORS.gray[700],
+  },
+  scheduleLineStrong: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.dark,
+  },
+  morePlansButton: {
+    marginTop: 2,
+    alignSelf: 'flex-start',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    backgroundColor: COLORS.gray[100],
+  },
+  morePlansButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.gray[700],
+  },
   metaRow: {
     flexDirection: 'row',
     gap: 10,
@@ -363,7 +522,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.gray[100],
   },
   metaChipAccent: {
-    backgroundColor: '#EFF6FF',
+    backgroundColor: COLORS.infoSoft,
   },
   metaIcon: {
     fontSize: 14,
@@ -386,7 +545,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   primaryAction: {
-    backgroundColor: '#EEF2FF',
+    backgroundColor: COLORS.primarySoft,
   },
   completedAction: {
     backgroundColor: COLORS.success,
@@ -401,7 +560,7 @@ const styles = StyleSheet.create({
   },
   imageOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: COLORS.overlayDark70,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
