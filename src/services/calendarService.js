@@ -67,29 +67,76 @@ export class CalendarService {
     return { isLocalAccount: true, name: CALENDAR_NAME };
   }
 
-  static buildEventPayload(sample) {
-    const dueDate = new Date(sample.dueDate);
-    const startDate = new Date(dueDate);
-    startDate.setHours(0, 0, 0, 0);
-    const endDate = new Date(startDate);
-    endDate.setDate(endDate.getDate() + 1);
+  static getSchedules(sample) {
+    if (Array.isArray(sample?.cureSchedules) && sample.cureSchedules.length > 0) {
+      return sample.cureSchedules.filter(
+        (schedule) => Number.isFinite(Number(schedule?.cureDays)) && schedule?.dueDate
+      );
+    }
+
+    if (sample?.dueDate) {
+      return [{
+        cureDays: sample.cureDays,
+        dueDate: sample.dueDate,
+      }];
+    }
+
+    return [];
+  }
+
+  static normalizeEventIds(sampleOrIds) {
+    if (Array.isArray(sampleOrIds)) {
+      return sampleOrIds.filter(Boolean);
+    }
+
+    if (Array.isArray(sampleOrIds?.calendarEventIds) && sampleOrIds.calendarEventIds.length > 0) {
+      return sampleOrIds.calendarEventIds.filter(Boolean);
+    }
+
+    if (sampleOrIds?.calendarEventId) {
+      return [sampleOrIds.calendarEventId];
+    }
+
+    return [];
+  }
+
+  static buildEventPayload(sample, schedule = null) {
+    const resolvedSchedule = schedule ?? this.getSchedules(sample)[0] ?? {
+      cureDays: sample.cureDays,
+      dueDate: sample.dueDate,
+    };
+    const dueDate = new Date(resolvedSchedule.dueDate);
+    const eventStart = new Date(dueDate);
+    eventStart.setHours(0, 0, 0, 0);
+    const eventEnd = new Date(eventStart);
+    eventEnd.setDate(eventEnd.getDate() + 1);
 
     if (Platform.OS === 'android') {
-      const timezoneOffset = startDate.getTimezoneOffset();
+      const timezoneOffset = eventStart.getTimezoneOffset();
       // Android treats all-day event times as UTC; normalize so the day stays intact
-      startDate.setMinutes(startDate.getMinutes() - timezoneOffset);
-      endDate.setMinutes(endDate.getMinutes() - timezoneOffset);
+      eventStart.setMinutes(eventStart.getMinutes() - timezoneOffset);
+      eventEnd.setMinutes(eventEnd.getMinutes() - timezoneOffset);
     }
     const alarms = [
       { relativeOffset: -1440 },
       { relativeOffset: 0 },
     ];
 
+    const cureStartLabel = sample.cureDate
+      ? new Date(sample.cureDate).toLocaleString('tr-TR')
+      : '-';
+    const dueLabel = dueDate.toLocaleString('tr-TR');
+    const cureDays = resolvedSchedule.cureDays ?? sample.cureDays;
+    const scheduleCount = this.getSchedules(sample).length;
+    const title = scheduleCount > 1
+      ? `${sample.name} - ${cureDays}. gün`
+      : `${sample.name} - Kür Takibi`;
+
     const notes = [
       `Numune: ${sample.name}`,
-      `Kür Süresi: ${sample.cureDays} gün`,
-      `Başlangıç: ${startDate.toLocaleString('tr-TR')}`,
-      `Bitiş: ${endDate.toLocaleString('tr-TR')}`,
+      `Kür Süresi: ${cureDays} gün`,
+      `Döküm: ${cureStartLabel}`,
+      `Bitiş: ${dueLabel}`,
     ].join('\n');
 
     let timeZone;
@@ -102,9 +149,9 @@ export class CalendarService {
     }
 
     return {
-      title: `${sample.name} - Kür Takibi`,
-      startDate,
-      endDate,
+      title,
+      startDate: eventStart,
+      endDate: eventEnd,
       allDay: true,
       notes,
       alarms,
@@ -112,7 +159,7 @@ export class CalendarService {
     };
   }
 
-  static async createEvent(sample) {
+  static async createEvent(sample, schedule = null) {
     try {
       const hasPermission = await this.requestPermissions();
       if (!hasPermission) {
@@ -120,7 +167,10 @@ export class CalendarService {
       }
 
       const calendarId = await this.ensureCalendar();
-      const eventId = await Calendar.createEventAsync(calendarId, this.buildEventPayload(sample));
+      const eventId = await Calendar.createEventAsync(
+        calendarId,
+        this.buildEventPayload(sample, schedule)
+      );
       return eventId;
     } catch (error) {
       console.error('Takvim etkinliği oluşturulamadı:', error);
@@ -128,9 +178,26 @@ export class CalendarService {
     }
   }
 
-  static async updateEvent(eventId, sample) {
+  static async createEvents(sample) {
+    const schedules = this.getSchedules(sample);
+    if (schedules.length === 0) {
+      return [];
+    }
+
+    const eventIds = [];
+    for (const schedule of schedules) {
+      const eventId = await this.createEvent(sample, schedule);
+      if (eventId) {
+        eventIds.push(eventId);
+      }
+    }
+
+    return eventIds;
+  }
+
+  static async updateEvent(eventId, sample, schedule = null) {
     if (!eventId) {
-      return this.createEvent(sample);
+      return this.createEvent(sample, schedule);
     }
 
     try {
@@ -139,12 +206,43 @@ export class CalendarService {
         return null;
       }
 
-      await Calendar.updateEventAsync(eventId, this.buildEventPayload(sample));
+      await Calendar.updateEventAsync(eventId, this.buildEventPayload(sample, schedule));
       return eventId;
     } catch (error) {
       console.error('Takvim etkinliği güncellenemedi:', error);
       return null;
     }
+  }
+
+  static async syncEvents(sample, existingEventIds = null) {
+    const schedules = this.getSchedules(sample);
+    const previousIds = this.normalizeEventIds(existingEventIds ?? sample);
+    const nextIds = [];
+
+    for (let index = 0; index < schedules.length; index += 1) {
+      const schedule = schedules[index];
+      const existingId = previousIds[index] ?? null;
+      let eventId = null;
+
+      if (existingId) {
+        eventId = await this.updateEvent(existingId, sample, schedule);
+      }
+
+      if (!eventId) {
+        eventId = await this.createEvent(sample, schedule);
+      }
+
+      if (eventId) {
+        nextIds.push(eventId);
+      }
+    }
+
+    const leftoverIds = previousIds.slice(schedules.length);
+    if (leftoverIds.length > 0) {
+      await this.deleteEvents(leftoverIds);
+    }
+
+    return nextIds;
   }
 
   static async deleteEvent(eventId) {
@@ -164,6 +262,16 @@ export class CalendarService {
       console.error('Takvim etkinliği silinemedi:', error);
       return false;
     }
+  }
+
+  static async deleteEvents(eventIds) {
+    const ids = this.normalizeEventIds(eventIds);
+    if (ids.length === 0) {
+      return true;
+    }
+
+    const results = await Promise.all(ids.map((eventId) => this.deleteEvent(eventId)));
+    return results.every(Boolean);
   }
 
   static async openSettings() {
@@ -194,12 +302,13 @@ export class CalendarService {
     return false;
   }
 
-  static async getEventsForDay(sample, excludeEventId = null) {
+  static async getEventsForDay(sample, excludeEventIds = null) {
     const hasPermission = await this.requestPermissions();
     if (!hasPermission) {
       return [];
     }
 
+    const excludeSet = new Set(this.normalizeEventIds(excludeEventIds));
     const target = new Date(sample.dueDate ?? sample);
     const start = new Date(target);
     start.setHours(0, 0, 0, 0);
@@ -215,11 +324,6 @@ export class CalendarService {
 
     try {
       const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
-      // console.log('CalendarService#getEventsForDay calendars', calendars.map(({ id, title, isVisible }) => ({
-      //   id,
-      //   title,
-      //   isVisible,
-      // })));
       const calendarIds = Array.from(
         new Set(
           calendars
@@ -227,16 +331,8 @@ export class CalendarService {
             .filter(Boolean)
         )
       );
-      // console.log('CalendarService#getEventsForDay ids', calendarIds);
-      // console.log('CalendarService#getEventsForDay range', {
-      //   start: start.toISOString(),
-      //   end: end.toISOString(),
-      //   sampleId: sample.id ?? null,
-      //   sampleDueDate: sample.dueDate ?? sample,
-      // });
 
       if (!calendarIds.length) {
-        console.log('CalendarService#getEventsForDay no calendar ids');
         return [];
       }
 
@@ -249,12 +345,11 @@ export class CalendarService {
         sampleId: sample.id ?? null,
       });
       if (!events?.length) {
-        console.log('CalendarService#getEventsForDay no events in range');
         return [];
       }
 
       const filtered = events.filter(event => {
-        if (excludeEventId && event.id === excludeEventId) {
+        if (excludeSet.has(event.id)) {
           return false;
         }
 
@@ -269,16 +364,10 @@ export class CalendarService {
 
         const overlaps = eventStart <= end && eventEnd >= start;
         if (!overlaps) {
-          console.log('CalendarService#getEventsForDay filtered out - overlap fail', {
-            id: event.id,
-            eventStart: eventStart.toISOString(),
-            eventEnd: eventEnd.toISOString(),
-          });
           return false;
         }
 
         if (!sample.cureDate) {
-          console.log('CalendarService#getEventsForDay kept (no cureDate)', event.id);
           return true;
         }
 
@@ -295,13 +384,37 @@ export class CalendarService {
     }
   }
 
+  static async getConflictsForSample(sample, excludeEventIds = null) {
+    const schedules = this.getSchedules(sample);
+    if (schedules.length === 0) {
+      return [];
+    }
+
+    const seen = new Set();
+    const conflicts = [];
+
+    for (const schedule of schedules) {
+      const dayEvents = await this.getEventsForDay(
+        { ...sample, dueDate: schedule.dueDate },
+        excludeEventIds
+      );
+
+      for (const event of dayEvents) {
+        if (seen.has(event.id)) {
+          continue;
+        }
+        seen.add(event.id);
+        conflicts.push(event);
+      }
+    }
+
+    return conflicts;
+  }
+
   static async fetchEventsForCalendars(calendars, start, end, context = {}) {
     const { label = 'debug', sampleId = null, maxEventLogs = 5 } = context;
     const header = `[CalendarDebug:${label}]`;
     const aggregated = [];
-        const test = await Calendar.getEventsAsync(["1"], start, end);
-
-     console.log("******************",test,"********************---")
 
     for (const calendar of calendars) {
       if (!calendar?.id) {
