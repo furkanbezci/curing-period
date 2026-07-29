@@ -19,8 +19,8 @@
     "production": {
       "android": {
         "serviceAccountKeyPath": "./cure-planner-be4fdd2e40cf.json",
-        "track": "internal",
-        "releaseStatus": "draft"
+        "track": "alpha",
+        "releaseStatus": "completed"
       },
       "ios": {}
     }
