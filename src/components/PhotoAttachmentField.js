@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -32,6 +32,19 @@ const PhotoAttachmentField = ({
   onSaveToGalleryEnabledChange,
 }) => {
   const [loading, setLoading] = useState(false);
+  const prevSaveToGalleryRef = useRef(saveToGalleryEnabled);
+
+  useEffect(() => {
+    const wasDisabled = !prevSaveToGalleryRef.current;
+    const isNowEnabled = saveToGalleryEnabled;
+    prevSaveToGalleryRef.current = saveToGalleryEnabled;
+
+    if (wasDisabled && isNowEnabled && value?.uri && value?.isNew) {
+      MediaService.saveToDeviceLibrary(value.uri).catch((err) => {
+        console.error('Switch sonrası galeri kaydetme hatası:', err);
+      });
+    }
+  }, [saveToGalleryEnabled, value]);
 
   const handleResult = async (action) => {
     setLoading(true);

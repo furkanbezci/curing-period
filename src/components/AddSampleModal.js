@@ -83,7 +83,11 @@ const AddSampleModal = ({
       setCureDays(baseCureDay);
       setStartDate(initialSample.cureDate ? new Date(initialSample.cureDate) : new Date());
       setPhoto(initialSample.photoUri ? { uri: initialSample.photoUri, size: null, isNew: false } : null);
-      setCalendarSyncEnabled(Boolean(initialSample.calendarSyncEnabled ?? initialSample.calendarEventId));
+      setCalendarSyncEnabled(Boolean(
+        initialSample.calendarSyncEnabled
+        ?? initialSample.calendarEventIds?.length
+        ?? initialSample.calendarEventId
+      ));
       setMultiCureDays((isMultiSample ? parsedCureDays : [baseCureDay]).map((value) => String(value)));
       setMultiDateEnabled(isMultiSample);
       originalPhotoUriRef.current = initialSample.photoUri ?? null;
@@ -143,17 +147,20 @@ const AddSampleModal = ({
       createdAt: createdAt.toISOString(),
       photoUri: finalPhotoUri,
       calendarSyncEnabled,
-      calendarEventId: calendarSyncEnabled ? initialSample?.calendarEventId ?? null : null,
+      calendarEventIds: calendarSyncEnabled
+        ? CalendarService.normalizeEventIds(initialSample)
+        : [],
+      calendarEventId: calendarSyncEnabled
+        ? CalendarService.normalizeEventIds(initialSample)[0] ?? null
+        : null,
       testReminderId: initialSample?.testReminderId ?? null,
     };
 
     if (calendarSyncEnabled) {
-      const dayEvents = await CalendarService.getEventsForDay(
+      const dayEvents = await CalendarService.getConflictsForSample(
         draftSample,
-        draftSample.calendarEventId
+        draftSample.calendarEventIds
       );
-      console.log("draftSample",draftSample)
-      console.log("dayEvents",dayEvents)
 
       if (dayEvents.length > 0) {
         const previewItems = dayEvents
@@ -178,10 +185,14 @@ const AddSampleModal = ({
           ? `${previewItems}\n• +${extraCount} etkinlik daha`
           : previewItems;
 
+        const conflictDaysLabel = draftSample.cureSchedules?.length > 1
+          ? 'Kür bitiş günlerinde'
+          : 'Kür bitiş günü';
+
         const proceed = await new Promise(resolve => {
           Alert.alert(
             'Takvim Uyarısı',
-            `Kür bitiş günü takvimde başka etkinlik(ler) var:\n\n${preview}\n\nYine de devam etmek ister misiniz?`,
+            `${conflictDaysLabel} takvimde başka etkinlik(ler) var:\n\n${preview}\n\nYine de devam etmek ister misiniz?`,
             [
               {
                 text: 'İptal',
@@ -510,7 +521,7 @@ const AddSampleModal = ({
                 <View style={styles.calendarInfo}>
                   <Text style={styles.summaryLabel}>Takvime ekle</Text>
                   <Text style={styles.calendarHelpText}>
-                    Takvime hatırlatıcı ekle.
+                    Her kür bitiş gününü takvime ekler.
                   </Text>
                 </View>
                 <Switch

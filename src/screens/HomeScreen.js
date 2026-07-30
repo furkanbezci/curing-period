@@ -69,12 +69,12 @@ const HomeScreen = () => {
         sample.dueDate
       );
 
-      let calendarEventId = sample.calendarEventId ?? null;
+      let calendarEventIds = CalendarService.normalizeEventIds(sample);
       let calendarSyncEnabled = Boolean(sample.calendarSyncEnabled);
 
       if (calendarSyncEnabled) {
-        calendarEventId = await CalendarService.createEvent(sample);
-        if (!calendarEventId) {
+        calendarEventIds = await CalendarService.createEvents(sample);
+        if (calendarEventIds.length === 0) {
           calendarSyncEnabled = false;
           Alert.alert(
             'Takvim Uyarısı',
@@ -87,7 +87,8 @@ const HomeScreen = () => {
         ...sample,
         notificationIds,
         testReminderId,
-        calendarEventId,
+        calendarEventIds,
+        calendarEventId: calendarEventIds[0] ?? null,
         calendarSyncEnabled,
       };
 
@@ -144,8 +145,10 @@ const HomeScreen = () => {
                 await NotificationService.cancelNotification(sample.testReminderId);
               }
 
-              if (sample?.calendarEventId) {
-                await CalendarService.deleteEvent(sample.calendarEventId);
+              if (sample?.calendarEventIds?.length || sample?.calendarEventId) {
+                await CalendarService.deleteEvents(
+                  sample.calendarEventIds ?? sample.calendarEventId
+                );
               }
 
               if (sample?.photoUri) {
@@ -195,27 +198,22 @@ const HomeScreen = () => {
         updatedSample.dueDate
       );
 
-      let calendarEventId = existing.calendarEventId ?? null;
+      let calendarEventIds = CalendarService.normalizeEventIds(existing);
       let calendarSyncEnabled = Boolean(updatedSample.calendarSyncEnabled);
 
       if (calendarSyncEnabled) {
-        const updatedId = await CalendarService.updateEvent(calendarEventId, updatedSample);
-        if (updatedId) {
-          calendarEventId = updatedId;
-        } else {
-          calendarEventId = await CalendarService.createEvent(updatedSample);
-        }
+        calendarEventIds = await CalendarService.syncEvents(updatedSample, calendarEventIds);
 
-        if (!calendarEventId) {
+        if (calendarEventIds.length === 0) {
           calendarSyncEnabled = false;
           Alert.alert(
             'Takvim Uyarısı',
             'Takvim güncellenemedi. Etkinlik bağlantısı kapatıldı.'
           );
         }
-      } else if (calendarEventId) {
-        await CalendarService.deleteEvent(calendarEventId);
-        calendarEventId = null;
+      } else if (calendarEventIds.length > 0) {
+        await CalendarService.deleteEvents(calendarEventIds);
+        calendarEventIds = [];
       }
 
       let nextSamples = [];
@@ -236,7 +234,8 @@ const HomeScreen = () => {
             ...updatedSample,
             notificationIds,
             testReminderId,
-            calendarEventId,
+            calendarEventIds,
+            calendarEventId: calendarEventIds[0] ?? null,
             calendarSyncEnabled,
           };
         });

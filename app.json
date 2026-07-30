@@ -14,24 +14,27 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.skyforge.cureplan"
+      "bundleIdentifier": "com.skyforge.cureplan",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#ffffff",
-        "versionCode":"1.0.0"
+        "versionCode": "1.0.0"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.skyforge.cureplan"
+      "package": "com.skyforge.cureplan",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    },
-    "extra": {
-      "eas": {
-        "projectId": "8f464f19-f8cb-4ec4-b1be-4186a9d43b3b"
-      }
     },
     "plugins": [
       [
@@ -48,6 +51,11 @@
           "savePhotosPermission": "Çekilen fotoğrafları galerinize kaydetmek için izin gerekir."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "8f464f19-f8cb-4ec4-b1be-4186a9d43b3b"
+      }
+    }
   }
 }
