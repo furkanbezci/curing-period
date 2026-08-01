@@ -18,6 +18,10 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 
+# Secrets / credentials
+cure-planner-*.json
+*service-account*.json
+
 # Metro
 .metro-health-check*
 
@@ -31,6 +35,7 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
 
 # Google Play / EAS submit credentials (asla commit etme)

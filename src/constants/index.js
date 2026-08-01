@@ -1,12 +1,16 @@
 export const COLORS = {
   primary: '#2563EB',
+  primarySoft: '#EEF2FF',
   secondary: '#64748B',
   success: '#059669',
   warning: '#D97706',
   danger: '#DC2626',
+  infoSoft: '#E3EDFF',
   light: '#F8FAFC',
   dark: '#1E293B',
   white: '#FFFFFF',
+  surfaceSuccess: '#F5FFF8',
+  overlayDark70: 'rgba(0,0,0,0.7)',
   gray: {
     50: '#F8FAFC',
     100: '#F1F5F9',

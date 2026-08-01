@@ -612,11 +612,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.gray[300],
     borderRadius: 8,
-    padding: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
     fontSize: 16,
+    lineHeight: 22,
     color: COLORS.dark,
     backgroundColor: COLORS.white,
-    height: 40,
+    minHeight: 48,
   },
   dateInfoSubtext: {
     fontSize: 14,
@@ -631,7 +633,7 @@ const styles = StyleSheet.create({
   },
   periodButton: {
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 10,
     borderRadius: 8,
     backgroundColor: COLORS.gray[100],
     borderWidth: 1,
@@ -643,6 +645,7 @@ const styles = StyleSheet.create({
   },
   periodButtonText: {
     fontSize: 14,
+    lineHeight: 20,
     color: COLORS.gray[700],
     fontWeight: '500',
   },
